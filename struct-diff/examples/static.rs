@@ -1,6 +1,3 @@
-
-//#![feature(associated_type_defaults)]
-
 use std::marker::PhantomData;
 
 //
@@ -22,9 +19,18 @@ trait Diffable<T, DiffT> {
 //   `std::marker::Copy` for type `std::string::String` in future versions")
 // - Additionally, trying to blanket impl for both Copy and Clone fails because for Copy values,
 //   the impl that should be used is ambiguous
+// - Also tried a separate "AllowCopyDiff" and "AllowCloneDiff" that impl Diffable. This works, but
+//   even if I impl AllowCopyDiff or AllowCloneDiff, I can't do something like
+//   <f32 as Diffable>::diff(...) which makes implementing the macro for making a struct difficult
+//   complex, and would require extra markup. So this approach has no benefit over using macros to
+//   impl directly for the type (i.e. f32).
+// - If we get specialization in Rust, there would likely be new approaches that could work that avoid
+//   macros.
+
 //
-
-
+// Attempted to use a custom type to avoid macros, did not work
+//
+/*
 trait AllowCopyDiff<T : PartialEq + Copy> {}
 trait AllowCloneDiff<T : PartialEq + Clone> {}
 
@@ -69,7 +75,11 @@ impl<U> Diffable<U, Option<U>> for dyn AllowCloneDiff<U>
         }
     }
 }
+*/
 
+//
+// Blanket impl for Copy, did not work
+//
 /*
 impl<T> Diffable<T, Option<T>> for T where T: PartialEq + Copy {
     fn diff(old: &T, new: &T) -> Option<T> {
@@ -88,6 +98,9 @@ impl<T> Diffable<T, Option<T>> for T where T: PartialEq + Copy {
 }
 */
 
+//
+// Blanket impl for Clone, did not work
+//
 /*
 impl<T> Diffable<T, Option<T>> for T where T: PartialEq + Clone {
     fn diff(old: &T, new: &T) -> Option<T> {
@@ -106,9 +119,6 @@ impl<T> Diffable<T, Option<T>> for T where T: PartialEq + Clone {
 }
 */
 
-
-
-/*
 macro_rules! allow_copy_diff {
     ($t:ty) => {
         impl Diffable<$t, Option<$t>> for $t {
@@ -166,8 +176,11 @@ allow_copy_diff!(u128);
 
 allow_clone_diff!(String);
 allow_clone_diff!(std::path::PathBuf);
-*/
 
+
+//
+// TODO: Custom implementation for handling a vector
+//
 struct VecDiff<T> {
     phantom_data: PhantomData<T>
 }
@@ -190,14 +203,14 @@ impl<T> Diffable<Vec<T>, Option<VecDiff<T>>> for Vec<T> where T: PartialEq + Clo
 }
 
 
-
+// TODO: Implement Diffable proc macro and derive it here
 struct MyInnerStruct {
     x: f32,
     a_string: String,
     string_list: Vec<String>
 }
 
-
+// TODO: Implement Diffable proc macro and derive it here
 struct MyStruct {
     a: f32,
     b: i32,
@@ -263,7 +276,7 @@ impl Diffable<MyStruct, Option<MyStructDiff>> for MyStruct {
         let mut has_change = false;
 
         {
-            let member_diff = <dyn AllowCopyDiff<f32> as Diffable<_, _>>::diff(&old.a, &new.a);
+            let member_diff = <f32 as Diffable<_, _>>::diff(&old.a, &new.a);
             if member_diff.is_some() {
                 struct_diff.a = member_diff;
                 has_change = true;
@@ -271,8 +284,7 @@ impl Diffable<MyStruct, Option<MyStructDiff>> for MyStruct {
         }
 
         {
-            let member_diff = <dyn AllowCopyDiff<i32> as Diffable<_, _>>::diff(&old.b, &new.b);
-            //let member_diff = <i32 as Diffable<_, _>>::diff(&old.b, &new.b);
+            let member_diff = <i32 as Diffable<_, _>>::diff(&old.b, &new.b);
             if member_diff.is_some() {
                 struct_diff.b = member_diff;
                 has_change = true;
@@ -332,7 +344,7 @@ impl Diffable<MyInnerStruct, Option<MyInnerStructDiff>> for MyInnerStruct {
         let mut has_change = false;
 
         {
-            let member_diff = <dyn AllowCopyDiff<f32> as Diffable<_, _>>::diff(&old.x, &new.x);
+            let member_diff = <f32 as Diffable<_, _>>::diff(&old.x, &new.x);
             if member_diff.is_some() {
                 struct_diff.x = member_diff;
                 has_change = true;
@@ -340,7 +352,7 @@ impl Diffable<MyInnerStruct, Option<MyInnerStructDiff>> for MyInnerStruct {
         }
 
         {
-            let member_diff = <dyn AllowCloneDiff<String> as Diffable<_, _>>::diff(&old.a_string, &new.a_string);
+            let member_diff = <String as Diffable<_, _>>::diff(&old.a_string, &new.a_string);
             if member_diff.is_some() {
                 struct_diff.a_string = member_diff;
                 has_change = true;

@@ -1,4 +1,6 @@
 
+//#![feature(associated_type_defaults)]
+
 use std::marker::PhantomData;
 
 //
@@ -9,14 +11,6 @@ trait Diffable<T, DiffT> {
     fn apply(diff: &DiffT, target: &mut T);
 }
 
-
-trait TestTrait {
-    type OtherType;
-}
-
-impl TestTrait for String {
-    type OtherType = f32;
-}
 
 //
 // These impls would have been nice but I found them problematic:
@@ -31,21 +25,50 @@ impl TestTrait for String {
 //
 
 
-//impl<T> Diffable<T, Option<T>> for T where T: TestTrait {
-//    fn diff(old: &T, new: &T) -> Option<T> {
-//        if old != new {
-//            Some(*new)
-//        } else {
-//            None
-//        }
-//    }
-//
-//    fn apply(diff: &Option<T>, target: &mut T) {
-//        if let Some(value) = diff {
-//            *target = *value;
-//        }
-//    }
-//}
+trait AllowCopyDiff<T : PartialEq + Copy> {}
+trait AllowCloneDiff<T : PartialEq + Clone> {}
+
+impl AllowCopyDiff<f32> for f32 {}
+impl AllowCopyDiff<i32> for i32 {}
+impl AllowCloneDiff<String> for String {}
+
+impl<U> Diffable<U, Option<U>> for dyn AllowCopyDiff<U>
+    where
+        U: PartialEq + Copy
+{
+    fn diff(old: &U, new: &U) -> Option<U> {
+        if old != new {
+            Some(*new)
+        } else {
+            None
+        }
+    }
+
+    fn apply(diff: &Option<U>, target: &mut U) {
+        if let Some(value) = diff {
+            *target = value.clone();
+        }
+    }
+}
+
+impl<U> Diffable<U, Option<U>> for dyn AllowCloneDiff<U>
+    where
+        U: PartialEq + Clone
+{
+    fn diff(old: &U, new: &U) -> Option<U> {
+        if old != new {
+            Some(new.clone())
+        } else {
+            None
+        }
+    }
+
+    fn apply(diff: &Option<U>, target: &mut U) {
+        if let Some(value) = diff {
+            *target = value.clone();
+        }
+    }
+}
 
 /*
 impl<T> Diffable<T, Option<T>> for T where T: PartialEq + Copy {
@@ -83,6 +106,9 @@ impl<T> Diffable<T, Option<T>> for T where T: PartialEq + Clone {
 }
 */
 
+
+
+/*
 macro_rules! allow_copy_diff {
     ($t:ty) => {
         impl Diffable<$t, Option<$t>> for $t {
@@ -140,14 +166,14 @@ allow_copy_diff!(u128);
 
 allow_clone_diff!(String);
 allow_clone_diff!(std::path::PathBuf);
-
+*/
 
 struct VecDiff<T> {
     phantom_data: PhantomData<T>
 }
 
 impl<T> Diffable<Vec<T>, Option<VecDiff<T>>> for Vec<T> where T: PartialEq + Clone {
-    fn diff(old: &Vec<T>, new: &Vec<T>) -> Option<VecDiff<T>> {
+    fn diff(_old: &Vec<T>, _new: &Vec<T>) -> Option<VecDiff<T>> {
 //        if old != new {
 //            Some(new.clone())
 //        } else {
@@ -156,10 +182,10 @@ impl<T> Diffable<Vec<T>, Option<VecDiff<T>>> for Vec<T> where T: PartialEq + Clo
         None
     }
 
-    fn apply(diff: &Option<VecDiff<T>>, target: &mut Vec<T>) {
-        if let Some(value) = diff {
-            //*target = value.clone();
-        }
+    fn apply(_diff: &Option<VecDiff<T>>, _target: &mut Vec<T>) {
+//        if let Some(value) = diff {
+//            *target = value.clone();
+//        }
     }
 }
 
@@ -237,7 +263,7 @@ impl Diffable<MyStruct, Option<MyStructDiff>> for MyStruct {
         let mut has_change = false;
 
         {
-            let member_diff = <f32 as Diffable<_, _>>::diff(&old.a, &new.a);
+            let member_diff = <dyn AllowCopyDiff<f32> as Diffable<_, _>>::diff(&old.a, &new.a);
             if member_diff.is_some() {
                 struct_diff.a = member_diff;
                 has_change = true;
@@ -245,7 +271,8 @@ impl Diffable<MyStruct, Option<MyStructDiff>> for MyStruct {
         }
 
         {
-            let member_diff = <i32 as Diffable<_, _>>::diff(&old.b, &new.b);
+            let member_diff = <dyn AllowCopyDiff<i32> as Diffable<_, _>>::diff(&old.b, &new.b);
+            //let member_diff = <i32 as Diffable<_, _>>::diff(&old.b, &new.b);
             if member_diff.is_some() {
                 struct_diff.b = member_diff;
                 has_change = true;
@@ -305,16 +332,15 @@ impl Diffable<MyInnerStruct, Option<MyInnerStructDiff>> for MyInnerStruct {
         let mut has_change = false;
 
         {
-            let member_diff = <f32 as Diffable<_, _>>::diff(&old.x, &new.x);
+            let member_diff = <dyn AllowCopyDiff<f32> as Diffable<_, _>>::diff(&old.x, &new.x);
             if member_diff.is_some() {
                 struct_diff.x = member_diff;
                 has_change = true;
             }
         }
 
-
         {
-            let member_diff = <String as Diffable<_, _>>::diff(&old.a_string, &new.a_string);
+            let member_diff = <dyn AllowCloneDiff<String> as Diffable<_, _>>::diff(&old.a_string, &new.a_string);
             if member_diff.is_some() {
                 struct_diff.a_string = member_diff;
                 has_change = true;

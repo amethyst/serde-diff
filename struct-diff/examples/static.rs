@@ -1,13 +1,24 @@
 use std::marker::PhantomData;
 
+use struct_diff_derive::Diffable;
+
 //
 // The basic trait for anything that's diffable
 //
-trait Diffable<T, DiffT> {
+trait DiffableByCustom<T, DiffT> {
     fn diff(old: &T, new: &T) -> DiffT;
     fn apply(diff: &DiffT, target: &mut T);
 }
 
+trait DiffableByClone<T, DiffT> {
+    fn diff(old: &T, new: &T) -> DiffT;
+    fn apply(diff: &DiffT, target: &mut T);
+}
+
+trait DiffableByCopy<T, DiffT> {
+    fn diff(old: &T, new: &T) -> DiffT;
+    fn apply(diff: &DiffT, target: &mut T);
+}
 
 //
 // These impls would have been nice but I found them problematic:
@@ -80,8 +91,8 @@ impl<U> Diffable<U, Option<U>> for dyn AllowCloneDiff<U>
 //
 // Blanket impl for Copy, did not work
 //
-/*
-impl<T> Diffable<T, Option<T>> for T where T: PartialEq + Copy {
+
+impl<T> DiffableByCopy<T, Option<T>> for T where T: PartialEq + Copy {
     fn diff(old: &T, new: &T) -> Option<T> {
         if old != new {
             Some(*new)
@@ -96,13 +107,13 @@ impl<T> Diffable<T, Option<T>> for T where T: PartialEq + Copy {
         }
     }
 }
-*/
+
 
 //
 // Blanket impl for Clone, did not work
 //
-/*
-impl<T> Diffable<T, Option<T>> for T where T: PartialEq + Clone {
+
+impl<T> DiffableByClone<T, Option<T>> for T where T: PartialEq + Clone {
     fn diff(old: &T, new: &T) -> Option<T> {
         if old != new {
             Some(new.clone())
@@ -117,11 +128,11 @@ impl<T> Diffable<T, Option<T>> for T where T: PartialEq + Clone {
         }
     }
 }
-*/
 
+/*
 macro_rules! allow_copy_diff {
     ($t:ty) => {
-        impl Diffable<$t, Option<$t>> for $t {
+        impl DiffableByCopy<$t, Option<$t>> for $t {
             fn diff(old: &$t, new: &$t) -> Option<$t> {
                 if old != new {
                     Some(*new)
@@ -141,7 +152,7 @@ macro_rules! allow_copy_diff {
 
 macro_rules! allow_clone_diff {
     ($t:ty) => {
-        impl Diffable<$t, Option<$t>> for $t {
+        impl DiffableByClone<$t, Option<$t>> for $t {
             fn diff(old: &$t, new: &$t) -> Option<$t> {
                 if old != new {
                     Some(new.clone())
@@ -176,6 +187,7 @@ allow_copy_diff!(u128);
 
 allow_clone_diff!(String);
 allow_clone_diff!(std::path::PathBuf);
+*/
 
 
 //
@@ -185,7 +197,7 @@ struct VecDiff<T> {
     phantom_data: PhantomData<T>
 }
 
-impl<T> Diffable<Vec<T>, Option<VecDiff<T>>> for Vec<T> where T: PartialEq + Clone {
+impl<T> DiffableByCustom<Vec<T>, Option<VecDiff<T>>> for Vec<T> where T: PartialEq + Clone {
     fn diff(_old: &Vec<T>, _new: &Vec<T>) -> Option<VecDiff<T>> {
 //        if old != new {
 //            Some(new.clone())
@@ -203,17 +215,23 @@ impl<T> Diffable<Vec<T>, Option<VecDiff<T>>> for Vec<T> where T: PartialEq + Clo
 }
 
 
-// TODO: Implement Diffable proc macro and derive it here
+#[derive(Diffable)]
 struct MyInnerStruct {
     x: f32,
+
+    #[diffable(Clone)]
     a_string: String,
+
+    #[diffable(Custom)]
     string_list: Vec<String>
 }
 
-// TODO: Implement Diffable proc macro and derive it here
+#[derive(Diffable)]
 struct MyStruct {
     a: f32,
     b: i32,
+
+    #[diffable(Custom, diff_type="MyInnerStructDiff")]
     c: MyInnerStruct
 }
 
@@ -270,13 +288,13 @@ struct MyStructDiff {
     c: Option<MyInnerStructDiff>
 }
 
-impl Diffable<MyStruct, Option<MyStructDiff>> for MyStruct {
+impl DiffableByCustom<MyStruct, Option<MyStructDiff>> for MyStruct {
     fn diff(old: &MyStruct, new: &MyStruct) -> Option<MyStructDiff> {
         let mut struct_diff = MyStructDiff::default();
         let mut has_change = false;
 
         {
-            let member_diff = <f32 as Diffable<_, _>>::diff(&old.a, &new.a);
+            let member_diff = <f32 as DiffableByCopy<_, _>>::diff(&old.a, &new.a);
             if member_diff.is_some() {
                 struct_diff.a = member_diff;
                 has_change = true;
@@ -284,7 +302,7 @@ impl Diffable<MyStruct, Option<MyStructDiff>> for MyStruct {
         }
 
         {
-            let member_diff = <i32 as Diffable<_, _>>::diff(&old.b, &new.b);
+            let member_diff = <i32 as DiffableByCopy<_, _>>::diff(&old.b, &new.b);
             if member_diff.is_some() {
                 struct_diff.b = member_diff;
                 has_change = true;
@@ -292,7 +310,7 @@ impl Diffable<MyStruct, Option<MyStructDiff>> for MyStruct {
         }
 
         {
-            let member_diff = <MyInnerStruct as Diffable<_, _>>::diff(&old.c, &new.c);
+            let member_diff = <MyInnerStruct as DiffableByCustom<_, _>>::diff(&old.c, &new.c);
             if member_diff.is_some() {
                 struct_diff.c = member_diff;
                 has_change = true;
@@ -338,13 +356,13 @@ struct MyInnerStructDiff {
     string_list: Option<VecDiff<String>>
 }
 
-impl Diffable<MyInnerStruct, Option<MyInnerStructDiff>> for MyInnerStruct {
+impl DiffableByCustom<MyInnerStruct, Option<MyInnerStructDiff>> for MyInnerStruct {
     fn diff(old: &MyInnerStruct, new: &MyInnerStruct) -> Option<MyInnerStructDiff> {
         let mut struct_diff = MyInnerStructDiff::default();
         let mut has_change = false;
 
         {
-            let member_diff = <f32 as Diffable<_, _>>::diff(&old.x, &new.x);
+            let member_diff = <f32 as DiffableByCopy<_, _>>::diff(&old.x, &new.x);
             if member_diff.is_some() {
                 struct_diff.x = member_diff;
                 has_change = true;
@@ -352,7 +370,7 @@ impl Diffable<MyInnerStruct, Option<MyInnerStructDiff>> for MyInnerStruct {
         }
 
         {
-            let member_diff = <String as Diffable<_, _>>::diff(&old.a_string, &new.a_string);
+            let member_diff = <String as DiffableByClone<_, _>>::diff(&old.a_string, &new.a_string);
             if member_diff.is_some() {
                 struct_diff.a_string = member_diff;
                 has_change = true;
@@ -360,7 +378,7 @@ impl Diffable<MyInnerStruct, Option<MyInnerStructDiff>> for MyInnerStruct {
         }
 
         {
-            let member_diff = <Vec<String> as Diffable<_, _>>::diff(&old.string_list, &new.string_list);
+            let member_diff = <Vec<String> as DiffableByCustom<_, _>>::diff(&old.string_list, &new.string_list);
             if member_diff.is_some() {
                 struct_diff.string_list = member_diff;
                 has_change = true;

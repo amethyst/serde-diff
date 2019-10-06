@@ -215,16 +215,16 @@ impl<T> DiffableByCustom<Vec<T>, Option<VecDiff<T>>> for Vec<T> where T: Partial
 }
 
 
-#[derive(Diffable)]
+#[derive(Diffable, Clone, PartialEq, Debug)]
 struct MyInnerStruct {
     x: f32,
 
-    //#[diffable(clone)]
-    //a_string: String,
+    #[diffable(clone)]
+    a_string: String,
 
     //#[diffable(custom, diff_type="VecDiff<String>")]
-    //#[diffable(clone)]
-    //string_list: Vec<String>
+    #[diffable(clone)]
+    string_list: Vec<String>
 }
 
 #[derive(Diffable)]
@@ -232,8 +232,11 @@ struct MyStruct {
     a: f32,
     b: i32,
 
-    //#[diffable(custom)]
-    //c: MyInnerStruct
+    #[diffable(clone)]
+    s: String,
+
+    #[diffable(clone)]
+    c: MyInnerStruct
 }
 
 
@@ -242,22 +245,24 @@ fn main() {
     let mut old = MyStruct {
         a: 5.0,
         b: 32,
-//        c: MyInnerStruct {
-//            x: 40.0,
-//            a_string: "my string".to_string(),
-//            string_list: vec![]
-//        }
+        s: "A string".to_string(),
+        c: MyInnerStruct {
+            x: 40.0,
+            a_string: "my string".to_string(),
+            string_list: vec!["str1".to_string(), "str2".to_string()]
+        }
     };
 
     // Create new state
     let mut new = MyStruct {
         a: 5.0,
         b: 32,
-//        c: MyInnerStruct {
-//            x: 40.0,
-//            a_string: "my string".to_string(),
-//            string_list: vec![]
-//        }
+        s: "A string".to_string(),
+        c: MyInnerStruct {
+            x: 40.0,
+            a_string: "my string".to_string(),
+            string_list: vec!["str1".to_string(), "str2".to_string()]
+        }
     };
 
     // Create a diff
@@ -269,9 +274,15 @@ fn main() {
     let diff = MyStruct::diff(&old, &new);
     assert!(diff.is_some());
 
+    println!("{:?}", diff);
     MyStruct::apply(&diff, &mut old);
 
     assert!(old.b == 33);
+
+    new.c.string_list = vec!["str1".to_string(), "str2_edited".to_string()];
+
+    let diff = MyStruct::diff(&old, &new);
+    println!("{:?}", diff);
 }
 
 

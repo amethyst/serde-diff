@@ -46,10 +46,13 @@ impl StructDiffFieldArgs {
     pub fn skip(&self) -> bool {
         return self.skip
     }
-    pub fn copy(&self) -> bool {
-        return self.copy
+    pub fn diff_by_copy(&self) -> bool {
+        return self.copy || (!self.clone && !self.custom);
     }
-    pub fn custom(&self) -> bool {
+    pub fn diff_by_clone(&self) -> bool {
+        return self.clone
+    }
+    pub fn diff_by_custom(&self) -> bool {
         return self.custom
     }
     pub fn diff_type(&self) -> &Option<syn::Path> {

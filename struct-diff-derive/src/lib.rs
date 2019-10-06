@@ -41,7 +41,7 @@ fn get_diff_type(field_args: &args::StructDiffFieldArgs) -> syn::Path {
     //   in the field attribute
     field_args.diff_type().clone().unwrap_or_else(|| {
         let ty = field_args.ty();
-        let diff_type = if field_args.custom() {
+        let diff_type = if field_args.diff_by_custom() {
             // Handles the case of a custom diff where diff_type is unspecified. Default it to
             // the struct name we would produce for the given type
             let s = format!("{}Diff", quote!(#ty));
@@ -125,7 +125,8 @@ fn generate(
     let diff_struct_name = quote::format_ident!("{}Diff", struct_name);
 
     let diff_struct = quote! {
-        #[derive(Default)]
+        //TODO: Need a way to control what is derived here (i.e. Debug, Serialize, etc.)
+        #[derive(Default, Debug)]
         struct #diff_struct_name {
             #(#diff_struct_fields),*
         }
@@ -136,7 +137,16 @@ fn generate(
 
         let ident = pf.field_args.ident().clone();
         let ty = pf.field_args.ty().clone();
-        let diffable_trait = quote::format_ident!("DiffableByCopy");
+
+        let diffable_trait = if pf.field_args.diff_by_copy() {
+            quote::format_ident!("DiffableByCopy")
+        } else if pf.field_args.diff_by_clone() {
+            quote::format_ident!("DiffableByClone")
+        } else if pf.field_args.diff_by_custom() {
+            quote::format_ident!("DiffableByCustom")
+        } else {
+            panic!("Expected field to be diffable by copy, clone, or custom");
+        };
 
         diff_fn_field_handlers.push(quote!{
             {
@@ -179,13 +189,29 @@ fn generate(
     let mut apply_fn_field_handlers = vec![];
     for pf in &parsed_fields {
         let ident = pf.field_args.ident().clone();
-        apply_fn_field_handlers.push(quote!{
-            if let Some(diff) = diff {
-                if let Some(#ident) = diff.#ident {
-                    target.#ident = #ident;
+
+        let handler = if pf.field_args.diff_by_copy() {
+            quote!{
+                if let Some(diff) = diff {
+                    if let Some(#ident) = diff.#ident {
+                        target.#ident = #ident;
+                    }
                 }
             }
-        });
+        } else if pf.field_args.diff_by_clone() {
+            quote!{
+                if let Some(diff) = diff {
+                    if let Some(#ident) = &diff.#ident {
+                        target.#ident = #ident.clone();
+                    }
+                }
+            }
+
+        } else {
+            unimplemented!()
+        };
+
+        apply_fn_field_handlers.push(handler);
     }
 
     let apply_fn = quote! {

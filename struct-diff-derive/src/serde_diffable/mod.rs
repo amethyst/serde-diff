@@ -74,12 +74,12 @@ struct ParsedField {
 }
 
 fn generate(
-    input: &syn::DeriveInput,
+    _input: &syn::DeriveInput,
     struct_args: args::StructDiffStructArgs,
     parsed_fields: Vec<ParsedField>,
 ) -> proc_macro::TokenStream
 {
-    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+    //let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
     let mut diff_fn_field_handlers = vec![];
     for pf in &parsed_fields {
@@ -89,23 +89,23 @@ fn generate(
         }
 
         let ident = pf.field_args.ident().clone();
-        let ty = pf.field_args.ty().clone();
         let ident_as_str = quote!(#ident).to_string();
 
         diff_fn_field_handlers.push(quote!{
             {
                 {
                     ctx.push_field(#ident_as_str);
-                    self.#ident.diff(ctx, &other.#ident);
-                    ctx.pop();
+                    self.#ident.diff(ctx, &other.#ident)?;
+                    ctx.pop_field();
                 }
             }
         });
     }
 
     let diff_fn = quote! {
-        fn diff<'a, S: SerializeSeq>(&self, ctx: &mut DiffContext<'a, S>, other: &Self) {
+        fn diff<'a, S: SerializeSeq>(&self, ctx: &mut DiffContext<'a, S>, other: &Self) -> Result<(), S::Error> {
             #(#diff_fn_field_handlers)*
+            Ok(())
         }
     };
 
@@ -121,7 +121,7 @@ fn generate(
         }));
     }
 
-    let apply_fn = quote! {
+    let _apply_fn = quote! {
         //fn diff<'a, S: SerializeSeq>(&self, ctx: &mut DiffContext<'a, S>, other: &Self) {
         //    #(#apply_fn_field_handlers)*
         //}

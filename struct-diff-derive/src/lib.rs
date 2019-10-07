@@ -4,8 +4,6 @@ extern crate proc_macro;
 mod diffable;
 mod serde_diffable;
 
-use quote::quote;
-
 #[proc_macro_derive(Diffable, attributes(diffable))]
 pub fn diffable_macro_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     diffable::diffable_macro_derive(input)

@@ -1,45 +1,73 @@
 use serde::{ser::SerializeSeq, Deserialize, Serialize, Serializer};
-use std::marker::PhantomData;
 
-use struct_diff_derive::Diffable;
 use struct_diff_derive::SerdeDiffable;
 
+/// Anything diffable implements this trait
 trait SerdeDiffable {
-    fn diff<'a, S: SerializeSeq>(&self, ctx: &mut DiffContext<'a, S>, other: &Self);
-    // fn apply(&mut self, ctx: &mut ApplyContext);
+    /// Recursively walk the struct, invoking serialize_element on each member if the element is
+    /// different.
+    fn diff<'a, S: SerializeSeq>(&self, ctx: &mut DiffContext<'a, S>, other: &Self) -> Result<(), S::Error>;
+
+    //fn apply(&mut self, ctx: &mut ApplyContext);
 }
+
+/// Used to describe a location within a struct. Typically this would be a member
+/// name but could potentially be a tuple index, Vec index, HashMap key, etc.
 #[derive(Serialize, Deserialize)]
 enum DiffPathElement {
+    /// A struct field
     Field(&'static str),
 }
+
+/// Describes a value of interest within a struct, and a reference to the data
 #[derive(Serialize)]
 struct DiffElement<'a, 's, T: Serialize> {
+    /// Identifier for the location of the value
     path: &'s Vec<DiffPathElement>,
+
+    /// Reference to the value within the struct
     element: &'a T,
 }
+
+/// Used during a diff operation for transient data used during the diff
 struct DiffContext<'a, S: SerializeSeq> {
+    /// A stack of identifiers that is maintained while we walk through the data recursively
     field_stack: Vec<DiffPathElement>,
+
+    /// Reference to the serializer used to save the data
     serializer: &'a mut S,
 }
+
+
 impl<'a, S: SerializeSeq> DiffContext<'a, S> {
+    /// Called when we visit a field. If the structure is recursive (i.e. struct within struct,
+    /// elements within an array) this may be called more than once before a corresponding pop_field
+    /// is called. See `pop_field`
     fn push_field(&mut self, field_name: &'static str) {
         self.field_stack.push(DiffPathElement::Field(field_name));
     }
-    fn save_value<T: Serialize>(&mut self, value: &T) {
+
+    /// Called when we finish visiting a field. See `push_field` for details
+    fn pop_field(&mut self) {
+        self.field_stack.pop();
+    }
+
+    /// Adds a `DiffElement` to the context. `DiffElements` contain the path to the data and a
+    /// reference to that data. This can be used later to store the changed values.
+    fn save_value<T: Serialize>(&mut self, value: &T) -> Result<(), S::Error> {
         let element = DiffElement {
             path: &self.field_stack,
             element: value,
         };
-        self.serializer.serialize_element(&element);
-    }
-    fn pop(&mut self) {
-        self.field_stack.pop();
+
+        self.serializer.serialize_element(&element)
     }
 }
-struct ApplyContext<'a, S: SerializeSeq> {
-    field_stack: Vec<DiffPathElement>,
-    serializer: &'a mut S,
-}
+
+//struct ApplyContext<'a, S: SerializeSeq> {
+//    field_stack: Vec<DiffPathElement>,
+//    serializer: &'a mut S,
+//}
 
 #[derive(Clone, PartialEq, Debug, SerdeDiffable)]
 struct MyInnerStruct {
@@ -60,24 +88,30 @@ struct MyStruct {
 }
 
 impl SerdeDiffable for i32 {
-    fn diff<'a, S: SerializeSeq>(&self, ctx: &mut DiffContext<'a, S>, other: &Self) {
+    fn diff<'a, S: SerializeSeq>(&self, ctx: &mut DiffContext<'a, S>, other: &Self) -> Result<(), S::Error> {
         if self != other {
-            ctx.save_value(self);
+            ctx.save_value(self)?;
         }
+
+        Ok(())
     }
 }
 impl SerdeDiffable for f32 {
-    fn diff<'a, S: SerializeSeq>(&self, ctx: &mut DiffContext<'a, S>, other: &Self) {
+    fn diff<'a, S: SerializeSeq>(&self, ctx: &mut DiffContext<'a, S>, other: &Self) -> Result<(), S::Error> {
         if self != other {
-            ctx.save_value(self);
+            ctx.save_value(self)?;
         }
+
+        Ok(())
     }
 }
 impl SerdeDiffable for String {
-    fn diff<'a, S: SerializeSeq>(&self, ctx: &mut DiffContext<'a, S>, other: &Self) {
+    fn diff<'a, S: SerializeSeq>(&self, ctx: &mut DiffContext<'a, S>, other: &Self) -> Result<(), S::Error> {
         if self != other {
-            ctx.save_value(&self);
+            ctx.save_value(&self)?;
         }
+
+        Ok(())
     }
 }
 //impl SerdeDiffable for Vec<String> {
@@ -88,6 +122,11 @@ impl SerdeDiffable for String {
 //    }
 //}
 
+
+
+//
+// This is emitted by deriving SerdeDiffable
+//
 /*
 impl SerdeDiffable for MyStruct {
     fn diff<'a, S: SerializeSeq>(&self, ctx: &mut DiffContext<'a, S>, other: &Self) {
@@ -256,7 +295,7 @@ allow_clone_diff!(std::path::PathBuf);
 
 fn main() {
     // Create old state
-    let mut old = MyStruct {
+    let old = MyStruct {
         a: 5.0,
         b: 31,
         s: "A string".to_string(),
@@ -268,7 +307,7 @@ fn main() {
     };
 
     // Create new state
-    let mut new = MyStruct {
+    let new = MyStruct {
         a: 5.0,
         b: 32,
         s: "A string".to_string(),
@@ -286,8 +325,8 @@ fn main() {
         serializer: &mut seq,
         field_stack: Vec::new(),
     };
-    old.diff(&mut ctx, &new);
-    seq.end();
+    old.diff(&mut ctx, &new).unwrap();
+    seq.end().unwrap();
     println!("{}", String::from_utf8(vec).unwrap());
 
     //     // Create a diff
@@ -309,125 +348,3 @@ fn main() {
     //     let diff = MyStruct::diff(&old, &new);
     //     println!("{:?}", diff);
 }
-
-//
-// This bit would be generated by a proc macro on MyStruct
-//
-
-/*
-#[derive(Default)]
-struct MyStructDiff {
-    a: Option<f32>,
-    b: Option<i32>,
-    c: Option<MyInnerStructDiff>
-}
-*/
-/*
-impl DiffableByCustom<MyStruct, Option<MyStructDiff>> for MyStruct {
-    fn diff(old: &MyStruct, new: &MyStruct) -> Option<MyStructDiff> {
-        let mut struct_diff = MyStructDiff::default();
-        let mut has_change = false;
-
-        {
-            let member_diff = <f32 as DiffableByCopy<_, _>>::diff(&old.a, &new.a);
-            if member_diff.is_some() {
-                struct_diff.a = member_diff;
-                has_change = true;
-            }
-        }
-
-        {
-            let member_diff = <i32 as DiffableByCopy<_, _>>::diff(&old.b, &new.b);
-            if member_diff.is_some() {
-                struct_diff.b = member_diff;
-                has_change = true;
-            }
-        }
-
-        {
-            let member_diff = <MyInnerStruct as DiffableByCustom<_, _>>::diff(&old.c, &new.c);
-            if member_diff.is_some() {
-                struct_diff.c = member_diff;
-                has_change = true;
-            }
-        }
-
-        if has_change {
-            Some(struct_diff)
-        } else {
-            None
-        }
-    }
-
-    fn apply(diff: &Option<MyStructDiff>, target: &mut MyStruct) {
-        if let Some(diff) = diff {
-            if let Some(a) = diff.a {
-                target.a = a;
-            }
-
-            if let Some(b) = diff.b {
-                target.b = b;
-            }
-        }
-    }
-}
-*/
-
-//
-// This bit would be generated by a proc macro on MyInnerStruct
-//
-
-/*
-#[derive(Default)]
-struct MyInnerStructDiff {
-    x: Option<f32>,
-    a_string: Option<String>,
-    string_list: Option<VecDiff<String>>
-}
-*/
-/*
-impl DiffableByCustom<MyInnerStruct, Option<MyInnerStructDiff>> for MyInnerStruct {
-    fn diff(old: &MyInnerStruct, new: &MyInnerStruct) -> Option<MyInnerStructDiff> {
-        let mut struct_diff = MyInnerStructDiff::default();
-        let mut has_change = false;
-
-        {
-            let member_diff = <f32 as DiffableByCopy<_, _>>::diff(&old.x, &new.x);
-            if member_diff.is_some() {
-                struct_diff.x = member_diff;
-                has_change = true;
-            }
-        }
-
-        {
-            let member_diff = <String as DiffableByClone<_, _>>::diff(&old.a_string, &new.a_string);
-            if member_diff.is_some() {
-                struct_diff.a_string = member_diff;
-                has_change = true;
-            }
-        }
-
-        {
-            let member_diff = <Vec<String> as DiffableByCustom<_, _>>::diff(&old.string_list, &new.string_list);
-            if member_diff.is_some() {
-                struct_diff.string_list = member_diff;
-                has_change = true;
-            }
-        }
-
-        if has_change {
-            Some(struct_diff)
-        } else {
-            None
-        }
-    }
-
-    fn apply(diff: &Option<MyInnerStructDiff>, target: &mut MyInnerStruct) {
-        if let Some(diff) = diff {
-            if let Some(x) = diff.x {
-                target.x = x;
-            }
-        }
-    }
-}
-*/

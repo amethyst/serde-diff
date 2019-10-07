@@ -102,15 +102,18 @@ struct ParsedField {
 }
 
 fn generate(
-    input: &syn::DeriveInput,
+    _input: &syn::DeriveInput,
     struct_args: args::StructDiffStructArgs,
     parsed_fields: Vec<ParsedField>,
 ) -> proc_macro::TokenStream
 {
-    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+    //let (_impl_generics, _ty_generics, _where_clause) = input.generics.split_for_impl();
 
     let mut diff_struct_fields = vec![];
     for pf in &parsed_fields {
+        if pf.field_args.skip() {
+            continue;
+        }
 
         let diff_ident = pf.field_args.ident().clone();
         let diff_type = pf.diff_type.clone();
@@ -133,6 +136,9 @@ fn generate(
 
     let mut diff_fn_field_handlers = vec![];
     for pf in &parsed_fields {
+        if pf.field_args.skip() {
+            continue;
+        }
 
         let ident = pf.field_args.ident().clone();
         let ty = pf.field_args.ty().clone();
@@ -177,6 +183,10 @@ fn generate(
 
     let mut apply_fn_field_handlers = vec![];
     for pf in &parsed_fields {
+        if pf.field_args.skip() {
+            continue;
+        }
+
         let ident = pf.field_args.ident().clone();
 
         let handler = if pf.field_args.diff_by_copy() {

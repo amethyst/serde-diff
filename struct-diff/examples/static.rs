@@ -1,5 +1,3 @@
-use std::marker::PhantomData;
-
 use struct_diff_derive::Diffable;
 
 //
@@ -191,26 +189,55 @@ allow_clone_diff!(std::path::PathBuf);
 
 
 //
-// TODO: Custom implementation for handling a vector
+// Example custom implementation for a Vec. This is a bit of a contrived example because it's unclear
+// how to handle removing elements or adding new elements that are at an index greater than the length
+// of the target Vec.
 //
-struct VecDiff<T> {
-    phantom_data: PhantomData<T>
+#[derive(Debug)]
+struct FixedLengthVecDiff<T> {
+    values: Vec<(usize, T)>,
+    count: usize
 }
 
-impl<T> DiffableByCustom<Vec<T>, Option<VecDiff<T>>> for Vec<T> where T: PartialEq + Clone {
-    fn diff(_old: &Vec<T>, _new: &Vec<T>) -> Option<VecDiff<T>> {
-//        if old != new {
-//            Some(new.clone())
-//        } else {
-//            None
-//        }
-        None
+impl<T> DiffableByCustom<Vec<T>, Option<FixedLengthVecDiff<T>>> for Vec<T> where T: PartialEq + Clone {
+    fn diff(old: &Vec<T>, new: &Vec<T>) -> Option<FixedLengthVecDiff<T>> {
+        let mut values = vec![];
+
+        // Diffing a Vec in this way doesn't make much sense unless the vec lengths are the same.
+        // If they aren't the same, using a proper key-value store is a better fit
+        assert!(old.len() == new.len());
+
+        for i in 0..new.len() {
+            match old.get(i) {
+                Some(old_value) => {
+                    if old_value != &new[i] {
+                        values.push((i, new[i].clone()));
+                    }
+                },
+                None => {
+                    values.push((i, new[i].clone()));
+                }
+            }
+        }
+
+        if values.len() > 0 || old.len() != new.len() {
+            Some(FixedLengthVecDiff {
+                values,
+                count: new.len()
+            })
+        } else {
+            None
+        }
     }
 
-    fn apply(_diff: &Option<VecDiff<T>>, _target: &mut Vec<T>) {
-//        if let Some(value) = diff {
-//            *target = value.clone();
-//        }
+    fn apply(diff: &Option<FixedLengthVecDiff<T>>, target: &mut Vec<T>) {
+        if let Some(diff) = diff {
+            assert!(diff.count == target.len());
+
+            for v in &diff.values {
+                target[v.0] = v.1.clone();
+            }
+        }
     }
 }
 
@@ -222,12 +249,11 @@ struct MyInnerStruct {
     #[diffable(clone)]
     a_string: String,
 
-    //#[diffable(custom, diff_type="VecDiff<String>")]
-    #[diffable(clone)]
+    #[diffable(custom, diff_type="FixedLengthVecDiff<String>")]
     string_list: Vec<String>
 }
 
-#[derive(Diffable)]
+#[derive(Diffable, Debug)]
 struct MyStruct {
     a: f32,
     b: i32,
@@ -235,7 +261,7 @@ struct MyStruct {
     #[diffable(clone)]
     s: String,
 
-    #[diffable(clone)]
+    #[diffable(custom)]
     c: MyInnerStruct
 }
 
@@ -274,15 +300,21 @@ fn main() {
     let diff = MyStruct::diff(&old, &new);
     assert!(diff.is_some());
 
-    println!("{:?}", diff);
+    println!("diff: {:?}", diff);
+    println!("  before: {:?}", old);
     MyStruct::apply(&diff, &mut old);
+    println!("  after : {:?}", old);
 
     assert!(old.b == 33);
 
     new.c.string_list = vec!["str1".to_string(), "str2_edited".to_string()];
 
     let diff = MyStruct::diff(&old, &new);
-    println!("{:?}", diff);
+    println!("diff: {:?}", diff);
+
+    println!("  before: {:?}", old);
+    MyStruct::apply(&diff, &mut old);
+    println!("  after : {:?}", old);
 }
 
 

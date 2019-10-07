@@ -205,9 +205,14 @@ fn generate(
                     }
                 }
             }
-
         } else {
-            unimplemented!()
+            //let diff_type = pf.diff_type.clone();
+            let ty = pf.field_args.ty().clone();
+            quote!{
+                if let Some(diff) = diff {
+                    <#ty as DiffableByCustom<_, _>>::apply(&diff.#ident, &mut target.#ident);
+                }
+            }
         };
 
         apply_fn_field_handlers.push(handler);

@@ -1,6 +1,14 @@
 use serde::{ser::SerializeSeq, Deserialize, Serialize, Serializer};
 
-use struct_diff_derive::SerdeDiffable;
+//use struct_diff_derive::SerdeDiffable;
+
+// NEXT STEPS:
+// - Decouple from serde_json as much as possible. We might need to use a "stream" format with
+//   well-defined data order to be able to use serde Deserializer trait.
+// - Make all fields work again
+// - Make it work via proc macro
+// - Blanket impl or impl-via-macro common std types (i.e f32, i32, String)
+// - Handle containers
 
 //TODO: Currently we store data as a flat list, i.e. {Vec<Path>, Value}, {Vec<Path>, Value}
 // This leads to redundant data and requires more lookups when we try to apply a diff
@@ -27,9 +35,8 @@ trait SerdeDiffable {
     /// different.
     fn diff<'a, S: SerializeSeq>(&self, ctx: &mut DiffContext<'a, S>, other: &Self) -> Result<(), S::Error>;
 
-    //fn apply<S: for<'de> Deserialize<'de>>(&mut self, ctx: &ApplyContext<S>);
     //TODO: This takes value by value because serde_json::from_value does too.
-    fn apply(&mut self, path: &[DiffPathElementValue], value: serde_json::Value) -> Result<(), serde_json::Error>;
+    fn apply_json(&mut self, path: &[DiffPathElementValue], depth: usize, value: serde_json::Value) -> Result<(), serde_json::Error>;
 }
 
 /// Used to describe a location within a struct. Typically this would be a member
@@ -92,7 +99,7 @@ enum DiffPathElementValue {
 }
 
 #[derive(Deserialize, Debug)]
-struct DiffElementValue {
+struct DiffElementValueJson {
     path: Vec<DiffPathElementValue>,
     element: serde_json::Value,
 }
@@ -135,7 +142,9 @@ impl SerdeDiffable for i32 {
         Ok(())
     }
 
-    fn apply(&mut self, path: &[DiffPathElementValue], value: serde_json::Value) -> Result<(), serde_json::Error> {
+    fn apply_json(&mut self, _path: &[DiffPathElementValue], depth: usize, value: serde_json::Value) -> Result<(), serde_json::Error> {
+        debug_assert!(_path.len() == depth);
+        *self = serde_json::from_value(value)?;
         Ok(())
     }
 }
@@ -195,15 +204,16 @@ impl SerdeDiffable for MyStruct {
 //
 //    }
 
-    fn apply(&mut self, path: &[DiffPathElementValue], value: serde_json::Value) -> Result<(), serde_json::Error> {
-        match &path[0] {
+    fn apply_json(&mut self, path: &[DiffPathElementValue], depth: usize, value: serde_json::Value) -> Result<(), serde_json::Error> {
+        match &path[depth] {
             DiffPathElementValue::Field(field_name) => {
                 if field_name == "b" {
-                    self.b = serde_json::from_value(value)?;
+                    self.b.apply_json(path, depth + 1, value)?;
                 }
             }
         }
 
+        // Unmatched values will be silently ignored
         Ok(())
     }
 }
@@ -211,7 +221,7 @@ impl SerdeDiffable for MyStruct {
 
 
 impl SerdeDiffable for MyInnerStruct {
-    fn diff<'a, S: SerializeSeq>(&self, ctx: &mut DiffContext<'a, S>, other: &Self) -> Result<(), S::Error> {
+    fn diff<'a, S: SerializeSeq>(&self, _ctx: &mut DiffContext<'a, S>, _other: &Self) -> Result<(), S::Error> {
 //        ctx.push_field("x");
 //        self.x.diff(ctx, &other.x)?;
 //        ctx.pop_field();
@@ -227,142 +237,16 @@ impl SerdeDiffable for MyInnerStruct {
 //
 //    }
 
-    fn apply(&mut self, path: &[DiffPathElementValue], value: serde_json::Value) -> Result<(), serde_json::Error> {
+    fn apply_json(&mut self, path: &[DiffPathElementValue], depth: usize, _value: serde_json::Value) -> Result<(), serde_json::Error> {
+        match &path[depth] {
+            DiffPathElementValue::Field(_field_name) => {
+            }
+        }
+
+        // Unmatched values will be silently ignored
         Ok(())
     }
 }
-
-
-//
-// These impls would have been nice but I found them problematic:
-// - We don't want to blanket impl for every Clone. Sometimes it's nice (like String) but sometimes
-//   it's undesirable. Vec would be better implemented with custom logic.
-// - It could be reasonable to blanket impl for every Copy. Unfortunately, if we do this and then
-//   try to custom impl for anything else (for example, String) the compiler will fail because it's
-//   concerned that String could become Copy in the future ("upstream crates may add new impl of trait
-//   `std::marker::Copy` for type `std::string::String` in future versions")
-// - Additionally, trying to blanket impl for both Copy and Clone fails because for Copy values,
-//   the impl that should be used is ambiguous
-// - Also tried a separate "AllowCopyDiff" and "AllowCloneDiff" that impl Diffable. This works, but
-//   even if I impl AllowCopyDiff or AllowCloneDiff, I can't do something like
-//   <f32 as Diffable>::diff(...) which makes implementing the macro for making a struct difficult
-//   complex, and would require extra markup. So this approach has no benefit over using macros to
-//   impl directly for the type (i.e. f32).
-// - If we get specialization in Rust, there would likely be new approaches that could work that avoid
-//   macros.
-
-//
-// Attempted to use a custom type to avoid macros, did not work
-//
-/*
-trait AllowCopyDiff<T : PartialEq + Copy> {}
-trait AllowCloneDiff<T : PartialEq + Clone> {}
-
-impl AllowCopyDiff<f32> for f32 {}
-impl AllowCopyDiff<i32> for i32 {}
-impl AllowCloneDiff<String> for String {}
-
-impl<U> Diffable<U, Option<U>> for dyn AllowCopyDiff<U>
-    where
-        U: PartialEq + Copy
-{
-    fn diff(old: &U, new: &U) -> Option<U> {
-        if old != new {
-            Some(*new)
-        } else {
-            None
-        }
-    }
-
-    fn apply(diff: &Option<U>, target: &mut U) {
-        if let Some(value) = diff {
-            *target = value.clone();
-        }
-    }
-}
-
-impl<U> Diffable<U, Option<U>> for dyn AllowCloneDiff<U>
-    where
-        U: PartialEq + Clone
-{
-    fn diff(old: &U, new: &U) -> Option<U> {
-        if old != new {
-            Some(new.clone())
-        } else {
-            None
-        }
-    }
-
-    fn apply(diff: &Option<U>, target: &mut U) {
-        if let Some(value) = diff {
-            *target = value.clone();
-        }
-    }
-}
-*/
-
-//
-// Blanket impl for Copy, did not work
-//
-/*
-macro_rules! allow_copy_diff {
-    ($t:ty) => {
-        impl DiffableByCopy<$t, Option<$t>> for $t {
-            fn diff(old: &$t, new: &$t) -> Option<$t> {
-                if old != new {
-                    Some(*new)
-                } else {
-                    None
-                }
-            }
-
-            fn apply(diff: &Option<$t>, target: &mut $t) {
-                if let Some(value) = diff {
-                    *target = *value;
-                }
-            }
-        }
-    }
-}
-
-macro_rules! allow_clone_diff {
-    ($t:ty) => {
-        impl DiffableByClone<$t, Option<$t>> for $t {
-            fn diff(old: &$t, new: &$t) -> Option<$t> {
-                if old != new {
-                    Some(new.clone())
-                } else {
-                    None
-                }
-            }
-
-            fn apply(diff: &Option<$t>, target: &mut $t) {
-                if let Some(value) = diff {
-                    *target = value.clone();
-                }
-            }
-        }
-    }
-}
-
-allow_copy_diff!(f32);
-allow_copy_diff!(f64);
-
-allow_copy_diff!(i8);
-allow_copy_diff!(i16);
-allow_copy_diff!(i32);
-allow_copy_diff!(i64);
-allow_copy_diff!(i128);
-
-allow_copy_diff!(u8);
-allow_copy_diff!(u16);
-allow_copy_diff!(u32);
-allow_copy_diff!(u64);
-allow_copy_diff!(u128);
-
-allow_clone_diff!(String);
-allow_clone_diff!(std::path::PathBuf);
-*/
 
 fn main() {
     let utf8_data = {
@@ -407,8 +291,6 @@ fn main() {
         utf8_data
     };
 
-
-
     let mut target = MyStruct {
         a: 5.0,
         b: 31,
@@ -420,44 +302,13 @@ fn main() {
         },
     };
 
-
-
-    //let mut c = std::io::Cursor::new(&data);
-    //let mut deserializer = serde_json::Deserializer::new(&utf8_data);
-    let data : Vec<DiffElementValue> = serde_json::from_str(&utf8_data).unwrap();
+    let data : Vec<DiffElementValueJson> = serde_json::from_str(&utf8_data).unwrap();
     println!("{:?}", data);
-
-
     println!("target: {:?}", target);
 
     for d in &data {
-        target.apply(&d.path, d.element.clone());
+        target.apply_json(&d.path, 0, d.element.clone()).unwrap();
     }
 
     println!("target: {:?}", target);
-
-    //let data =
-    //deserializer.
-
-
-
-
-    //     // Create a diff
-    //     let diff = MyStruct::diff(&old, &new);
-    //     assert!(diff.is_none());
-
-    //     new.b = 33;
-
-    //     let diff = MyStruct::diff(&old, &new);
-    //     assert!(diff.is_some());
-
-    //     println!("{:?}", diff);
-    //     MyStruct::apply(&diff, &mut old);
-
-    //     assert!(old.b == 33);
-
-    //     new.c.string_list = vec!["str1".to_string(), "str2_edited".to_string()];
-
-    //     let diff = MyStruct::diff(&old, &new);
-    //     println!("{:?}", diff);
 }

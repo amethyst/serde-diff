@@ -2,6 +2,7 @@ use serde::{ser::SerializeSeq, Deserialize, Serialize, Serializer};
 use std::marker::PhantomData;
 
 use struct_diff_derive::Diffable;
+use struct_diff_derive::SerdeDiffable;
 
 trait SerdeDiffable {
     fn diff<'a, S: SerializeSeq>(&self, ctx: &mut DiffContext<'a, S>, other: &Self);
@@ -40,21 +41,24 @@ struct ApplyContext<'a, S: SerializeSeq> {
     serializer: &'a mut S,
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, SerdeDiffable)]
 struct MyInnerStruct {
     x: f32,
 
     a_string: String,
 
+    #[serde_diffable(skip)]
     string_list: Vec<String>,
 }
 
+#[derive(SerdeDiffable)]
 struct MyStruct {
     a: f32,
     b: i32,
     s: String,
     c: MyInnerStruct,
 }
+
 impl SerdeDiffable for i32 {
     fn diff<'a, S: SerializeSeq>(&self, ctx: &mut DiffContext<'a, S>, other: &Self) {
         if self != other {
@@ -76,7 +80,15 @@ impl SerdeDiffable for String {
         }
     }
 }
+//impl SerdeDiffable for Vec<String> {
+//    fn diff<'a, S: SerializeSeq>(&self, ctx: &mut DiffContext<'a, S>, other: &Self) {
+//        if self != other {
+//            ctx.save_value(&self);
+//        }
+//    }
+//}
 
+/*
 impl SerdeDiffable for MyStruct {
     fn diff<'a, S: SerializeSeq>(&self, ctx: &mut DiffContext<'a, S>, other: &Self) {
         ctx.push_field("a");
@@ -93,6 +105,9 @@ impl SerdeDiffable for MyStruct {
         ctx.pop();
     }
 }
+*/
+
+/*
 impl SerdeDiffable for MyInnerStruct {
     fn diff<'a, S: SerializeSeq>(&self, ctx: &mut DiffContext<'a, S>, other: &Self) {
         ctx.push_field("x");
@@ -106,6 +121,7 @@ impl SerdeDiffable for MyInnerStruct {
         // ctx.pop();
     }
 }
+*/
 
 //
 // These impls would have been nice but I found them problematic:

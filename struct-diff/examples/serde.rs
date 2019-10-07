@@ -147,7 +147,7 @@ impl<'a, 'de, T: SerdeDiffable + for<'c> Deserialize<'c>> Deserialize<'de> for A
     {
         deserializer.deserialize_seq(Apply {
             target: place.target,
-        });
+        })?;
         Ok(())
     }
 }
@@ -162,7 +162,7 @@ impl<'a, 'de, T: SerdeDiffable + for<'c> Deserialize<'c>> de::Visitor<'de> for A
         A: de::SeqAccess<'de>,
     {
         let mut ctx = ApplyContext {};
-        self.target.apply(&mut seq, &mut ctx);
+        self.target.apply(&mut seq, &mut ctx)?;
         Ok(())
     }
 }
@@ -200,8 +200,10 @@ impl ApplyContext {
     where
         A: de::SeqAccess<'de>,
     {
-        if let Some(new_val) = seq.next_element()? {
-            *val = new_val;
+        if let Some(new_val) = seq.next_element::<DiffCommandValue<T>>()? {
+            if let DiffCommandValue::Value(new_val) = new_val {
+                *val = new_val;
+            }
         }
         Ok(())
     }
@@ -294,7 +296,8 @@ impl SerdeDiffable for i32 {
     where
         A: de::SeqAccess<'de>,
     {
-        ctx.read_value(seq, self)
+        ctx.read_value(seq, self)?;
+        Ok(())
     }
 }
 

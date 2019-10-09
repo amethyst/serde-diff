@@ -11,25 +11,17 @@ use std::borrow::Cow;
 // - Make it work via proc macro
 // - Blanket impl or impl-via-macro common std types (i.e f32, i32, String)
 // - Handle containers
+// - Ignore type mismatches instead of propagating the error
 
-//TODO: Currently we store data as a flat list, i.e. {Vec<Path>, Value}, {Vec<Path>, Value}
-// This leads to redundant data and requires more lookups when we try to apply a diff
-// It might be better to try to store it hierarchically:
-// {
-//     path: field1,
-//     children: [
-//         {
-//             path: sub_field1,
-//             value: "a value"
-//         },
-//         {
-//             path: sub_field2,
-//             value: "a value"
-//         }
-//     ]
-// }
-// Repeatedly following the full path could be painful if we had many fields, which could happen
-// the data has a Vec deeply nested within the struct
+//TODO: Currently we store data as a command list that encodes the hierarchy, i.e.
+// [{"Enter":{"Field":"a"}},{"Value":3.0},{"Enter":{"Field":"c"}},{"Enter":{"Field":"x"}},{"Value":39.0}]
+// Value is decoded as an implicit Exit to avoid excessive Exits in the data stream.
+// It could probably be smaller and more readable in a text-based format.
+//
+// A problem occurs when encoding the command stream for bincode:
+// We need to know the size of the list before we start serializing.
+// To do so, we probably want to implement the serde::ser::Serializer trait and
+// make the implementation only count up every time an element is serialized, doing nothing else.
 
 /// Anything diffable implements this trait
 pub trait SerdeDiffable {
@@ -101,7 +93,8 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
     }
 }
 
-struct Diff<'a, 'b, T> {
+/// Serializes the difference between two values of a type
+pub struct Diff<'a, 'b, T> {
     old: &'a T,
     new: &'b T,
 }
@@ -129,6 +122,7 @@ impl<'a, 'b, T: SerdeDiffable> Serialize for Diff<'a, 'b, T> {
     }
 }
 
+/// Deserializes a [Diff]
 pub struct Apply<'a, T: SerdeDiffable> {
     target: &'a mut T,
 }
@@ -172,6 +166,7 @@ impl<'a, 'de, T: SerdeDiffable> de::Visitor<'de> for Apply<'a, T> {
 /// Used during an apply operation for transient data used during the apply
 pub struct ApplyContext {}
 impl ApplyContext {
+    /// Returns the next element if it is a path. If it is a Value or Exit, it returns None.
     pub fn next_path_element<'de, A>(
         &mut self,
         seq: &mut A,
@@ -185,7 +180,6 @@ impl ApplyContext {
             Some(Value(_)) => panic!("unexpected DiffCommand::Value"),
             Some(Exit) | Some(Nothing) | None => Ok(None),
         };
-        println!("next path {:?}", element);
         element
     }
     /// To be called after next_path_element returns a path, but the path is not recognized.
@@ -208,7 +202,6 @@ impl ApplyContext {
     {
         // TODO somehow skip the value without knowing the type - not possible for some formats, so should probably panic
         while let Some(cmd) = seq.next_element_seed(DiffCommandIgnoreValue {})? {
-            println!("skipped {:?}", cmd);
             match cmd {
                 DiffCommandValue::Enter(_) => depth += 1,
                 DiffCommandValue::Exit => depth -= 1,
@@ -224,6 +217,7 @@ impl ApplyContext {
         }
         Ok(())
     }
+    /// Attempts to deserialize a value
     pub fn read_value<'de, A, T: for<'c> Deserialize<'c>>(
         &mut self,
         seq: &mut A,
@@ -236,7 +230,6 @@ impl ApplyContext {
         let cmd = seq.next_element_seed::<DiffCommandDeserWrapper<T>>(DiffCommandDeserWrapper {
             val_wrapper: DeserWrapper { val },
         })?;
-        println!("read value?");
         match cmd {
             Some(DiffCommandValue::Enter(_)) => {
                 self.skip_value_internal(seq, 1)?;
@@ -393,6 +386,7 @@ impl<'a, 'de, T: Deserialize<'de>> de::DeserializeSeed<'de> for DeserWrapper<'a,
     }
 }
 
+// Deserializes a DiffCommand but ignores values
 struct DiffCommandIgnoreValue;
 impl<'de> de::DeserializeSeed<'de> for DiffCommandIgnoreValue {
     type Value = DiffCommandValue<'de, ()>;
@@ -460,39 +454,6 @@ enum DiffCommandValue<'a, T> {
     Nothing,
 }
 
-mod expand {
-    use super::*;
-    #[derive(Deserialize)]
-    enum DiffCommandValueTest<'a, T> {
-        // Enter a path element
-        #[serde(borrow)]
-        Enter(DiffPathElementValue<'a>),
-        Value(T),
-        // Exit a path element
-        Exit,
-    }
-}
-
-struct DiffCommandVisitor {}
-// impl<'de> de::Visitor<'de> for DiffCommandVisitor {}
-
-// impl<'a: 'de, 'b: 'de, 'de, T: de::Deserialize<'de>> Deserialize<'de>
-//     for &'b DiffCommandValue<'a, T>
-// {
-//     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-//     where
-//         D: de::Deserializer<'de>,
-//     {
-//         // deserializer.deserialize_enum("DiffCommandValue", ["Enter", "Value", "Exit"])
-//     }
-//     fn deserialize_in_place<D>(deserializer: D, place: &mut Self) -> Result<(), D::Error>
-//     where
-//         D: de::Deserializer<'de>,
-//     {
-//         *place = Deserialize::deserialize(deserializer)?;
-//         Ok(())
-//     }
-// }
 #[derive(Serialize, Deserialize, Debug)]
 pub enum DiffPathElementValue<'a> {
     /// A struct field
@@ -613,7 +574,6 @@ impl SerdeDiffable for String {
 //
 // This is emitted by deriving SerdeDiffable
 //
-
 impl SerdeDiffable for MyStruct {
     fn diff<'a, S: SerializeSeq>(
         &self,
@@ -651,7 +611,6 @@ impl SerdeDiffable for MyStruct {
                 _ => ctx.skip_value(seq)?,
             }
         }
-        println!("exiting MyStruct");
         Ok(())
     }
 }
@@ -686,8 +645,9 @@ impl SerdeDiffable for MyInnerStruct {
         A: de::SeqAccess<'de>,
     {
         while let Some(DiffPathElementValue::Field(element)) = ctx.next_path_element(seq)? {
-            match element {
-                // "x" => SerdeDiffable::apply(self.x, seq, ctx)?,
+            match element.as_ref() {
+                "x" => self.x.apply(seq, ctx)?,
+                "a_string" => self.a_string.apply(seq, ctx)?,
                 _ => ctx.skip_value(seq)?,
             }
         }
@@ -716,7 +676,7 @@ fn main() {
             s: "A string".to_string(),
             c: MyInnerStruct {
                 x: 39.0,
-                a_string: "my string".to_string(),
+                a_string: "my other string".to_string(),
                 string_list: vec!["str1".to_string(), "str2".to_string()],
             },
         };
@@ -725,7 +685,8 @@ fn main() {
         let mut serializer = serde_json::Serializer::new(&mut c);
         Diff::diff(&mut serializer, &old, &new).unwrap();
 
-        let bincode_data = bincode::serialize(&Diff::serializable(&old, &new)).unwrap();
+        // let bincode_data = bincode::serialize(&Diff::serializable(&old, &new)).unwrap();
+        let bincode_data = vec![0];
 
         let utf8_data = String::from_utf8(vec).unwrap();
 
@@ -749,8 +710,8 @@ fn main() {
     let mut deserializer = serde_json::Deserializer::from_reader(c);
     Apply::apply(&mut deserializer, &mut target).unwrap();
 
-    bincode::config()
-        .deserialize_seed(Apply::deserializable(&mut target), &bincode_data)
-        .unwrap();
+    // bincode::config()
+    //     .deserialize_seed(Apply::deserializable(&mut target), &bincode_data)
+    //     .unwrap();
     println!("target {:?}", target);
 }

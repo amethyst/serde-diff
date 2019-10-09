@@ -69,6 +69,7 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
                 let cmd = DiffCommandRef::<()>::Exit;
                 self.serializer.serialize_element(&cmd)
             } else {
+                self.field_written = false;
                 Ok(())
             }
         } else {

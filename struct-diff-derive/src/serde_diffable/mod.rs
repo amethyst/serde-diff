@@ -90,13 +90,14 @@ fn generate(
 
         let ident = pf.field_args.ident().clone();
         let ident_as_str = quote!(#ident).to_string();
+        let ty = pf.field_args.ty();
 
         diff_fn_field_handlers.push(quote!{
             {
                 {
                     ctx.push_field(#ident_as_str);
-                    self.#ident.diff(ctx, &other.#ident)?;
-                    ctx.pop_field();
+                    <#ty as SerdeDiffable>::diff(&self.#ident, ctx, &other.#ident)?;
+                    ctx.pop_path_element();
                 }
             }
         });
@@ -116,15 +117,31 @@ fn generate(
             continue;
         }
 
-        apply_fn_field_handlers.push(quote!({
+        let ident = pf.field_args.ident().clone();
+        let ident_as_str = quote!(#ident).to_string();
+        let ty = pf.field_args.ty();
 
-        }));
+        apply_fn_field_handlers.push(quote!(
+            #ident_as_str => <#ty as SerdeDiffable>::apply(&mut self.#ident, seq, ctx)?,
+        ));
     }
 
-    let _apply_fn = quote! {
-        //fn diff<'a, S: SerializeSeq>(&self, ctx: &mut DiffContext<'a, S>, other: &Self) {
-        //    #(#apply_fn_field_handlers)*
-        //}
+    let apply_fn = quote! {
+        fn apply<'de, A>(
+            &mut self,
+            seq: &mut A,
+            ctx: &mut ApplyContext,
+        ) -> Result<(), <A as de::SeqAccess<'de>>::Error>
+        where
+            A: de::SeqAccess<'de>, {
+            while let Some(DiffPathElementValue::Field(element)) = ctx.next_path_element(seq)? {
+                match element.as_ref() {
+                    #(#apply_fn_field_handlers)*
+                    _ => ctx.skip_value(seq)?,
+                }
+            }
+            Ok(())
+        }
     };
 
     let struct_name = &struct_args.ident;
@@ -132,7 +149,7 @@ fn generate(
     let diff_impl = quote! {
         impl SerdeDiffable for #struct_name {
             #diff_fn
-            //#apply_fn
+            #apply_fn
         }
     };
 

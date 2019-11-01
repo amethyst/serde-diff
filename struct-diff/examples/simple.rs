@@ -1,4 +1,3 @@
-
 //fn diff<T>(a: &T, b: &T) -> Option<Box<Diff<T>>> {
 //    None
 //}
@@ -6,10 +5,6 @@
 //fn apply<T>(diff: &dyn Diff<T>, target: &mut T) {
 //
 //}
-
-
-
-
 
 trait Diff<T> {
     fn apply(&self, target: &mut T);
@@ -21,13 +16,13 @@ trait Diffable<T> {
 
 struct MyStruct {
     a: f32,
-    b: i32
+    b: i32,
 }
 
 #[derive(Default)]
 struct MyStructDiff {
     a: Option<f32>,
-    b: Option<i32>
+    b: Option<i32>,
 }
 
 impl Diffable<Self> for MyStruct {
@@ -65,7 +60,4 @@ impl Diff<MyStruct> for MyStructDiff {
     }
 }
 
-
-fn main() {
-
-}
+fn main() {}

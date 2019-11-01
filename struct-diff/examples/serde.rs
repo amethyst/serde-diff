@@ -1,6 +1,11 @@
-use serde::{de, ser::SerializeSeq, Deserialize, Serialize, Serializer};
+use serde::{
+    de,
+    ser::{self, SerializeSeq},
+    Deserialize, Serialize, Serializer,
+};
 use serde_derive::*;
 use std::borrow::Cow;
+use struct_diff_derive::*;
 
 //use struct_diff_derive::SerdeDiffable;
 
@@ -53,15 +58,20 @@ pub struct DiffContext<'a, S: SerializeSeq> {
 
 impl<'a, S: SerializeSeq> DiffContext<'a, S> {
     /// Called when we visit a field. If the structure is recursive (i.e. struct within struct,
-    /// elements within an array) this may be called more than once before a corresponding pop_field
-    /// is called. See `pop_field`
+    /// elements within an array) this may be called more than once before a corresponding pop_path_element
+    /// is called. See `pop_path_element`
     fn push_field(&mut self, field_name: &'static str) {
         self.field_stack
             .push(DiffPathElementValue::Field(Cow::Borrowed(field_name)));
     }
 
+    fn push_index(&mut self, idx: usize) {
+        self.field_stack
+            .push(DiffPathElementValue::Index(idx));
+    }
+
     /// Called when we finish visiting a field. See `push_field` for details
-    fn pop_field(&mut self) -> Result<(), S::Error> {
+    fn pop_path_element(&mut self) -> Result<(), S::Error> {
         if self.field_stack.is_empty() {
             // if we don't have any buffered fields, we just write Exit command directly to the serializer
             // if we've just written a field, skip the Exit
@@ -112,7 +122,19 @@ impl<'a, 'b, T: SerdeDiffable> Serialize for Diff<'a, 'b, T> {
     where
         S: Serializer,
     {
-        let mut seq = serializer.serialize_seq(None)?;
+        let num_elements = {
+            let mut serializer = CountingSerializer { num_elements: 0 };
+            let mut seq = serializer.serialize_seq(None).unwrap();
+            let mut ctx = DiffContext {
+                field_stack: Vec::new(),
+                serializer: &mut seq,
+                field_written: false,
+            };
+            self.old.diff(&mut ctx, &self.new).unwrap();
+            seq.end().unwrap();
+            serializer.num_elements
+        };
+        let mut seq = serializer.serialize_seq(Some(num_elements))?;
         let mut ctx = DiffContext {
             field_stack: Vec::new(),
             serializer: &mut seq,
@@ -460,9 +482,11 @@ pub enum DiffPathElementValue<'a> {
     /// A struct field
     #[serde(borrow)]
     Field(Cow<'a, str>),
+    /// A collection index
+    Index(usize),
 }
 
-#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
+#[derive(SerdeDiffable, Clone, PartialEq, Serialize, Deserialize, Debug)]
 struct MyInnerStruct {
     //#[serde_diffable(skip)]
     x: f32,
@@ -474,8 +498,7 @@ struct MyInnerStruct {
     string_list: Vec<String>,
 }
 
-//#[derive(SerdeDiffable)]
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(SerdeDiffable, Serialize, Deserialize, Debug)]
 struct MyStruct {
     //#[serde_diffable(skip)]
     a: f32,
@@ -508,6 +531,61 @@ impl SerdeDiffable for i32 {
         A: de::SeqAccess<'de>,
     {
         ctx.read_value(seq, self)?;
+        Ok(())
+    }
+}
+#[derive(Serialize, Deserialize)]
+pub enum CollectionDiffValue<T: Serialize + Deserialize> {
+    Removed,
+    Value(T)
+}
+#[derive(Serialize, Deserialize)]
+pub enum CollectionDiffRef<'a, T: Serialize + Deserialize> {
+    Removed,
+    Value(&'a T)
+}
+impl<T: PartialEq + SerdeDiffable> SerdeDiffable for Vec<T>
+{
+    fn diff<'a, S: SerializeSeq>(
+        &self,
+        ctx: &mut DiffContext<'a, S>,
+        other: &Self,
+    ) -> Result<(), S::Error> {
+        let mut self_iter = <Self as IntoIterator>::into_iter(self);
+        let mut other_iter = <Self as IntoIterator::into_iter(other);
+        let mut idx = 0;
+        loop {
+            let self_item = self_iter.next();
+            let other_item = other_iter.next();
+            if self_item.is_none() && other_item.is_none() {
+                break;
+            }
+            if self_item != other_item {
+                let to_serialize = if let Some(item) = other_item {
+                    CollectionDiffRef::Value(item);
+                } else {
+                    CollectionDiffRef::Removed
+                };
+                ctx.push_index(idx);
+                <T as SerdeDiffable>::diff(ctx)
+                ctx.pop_path_element();
+            }
+            idx += 1;
+        }
+        Ok(())
+    }
+
+    fn apply<'de, A>(
+        &mut self,
+        seq: &mut A,
+        ctx: &mut ApplyContext,
+    ) -> Result<(), <A as de::SeqAccess<'de>>::Error>
+    where
+        A: de::SeqAccess<'de>,
+    {
+        for item in self.into_iter() {
+            
+        }
         Ok(())
     }
 }
@@ -575,86 +653,86 @@ impl SerdeDiffable for String {
 //
 // This is emitted by deriving SerdeDiffable
 //
-impl SerdeDiffable for MyStruct {
-    fn diff<'a, S: SerializeSeq>(
-        &self,
-        ctx: &mut DiffContext<'a, S>,
-        other: &Self,
-    ) -> Result<(), S::Error> {
-        ctx.push_field("a");
-        self.a.diff(ctx, &other.a)?;
-        ctx.pop_field()?;
-        ctx.push_field("b");
-        self.b.diff(ctx, &other.b)?;
-        ctx.pop_field()?;
-        //        ctx.push_field("s");
-        //        self.s.diff(ctx, &other.s)?;
-        //        ctx.pop_field();
-        ctx.push_field("c");
-        self.c.diff(ctx, &other.c)?;
-        ctx.pop_field()?;
-        Ok(())
-    }
+// impl SerdeDiffable for MyStruct {
+//     fn diff<'a, S: SerializeSeq>(
+//         &self,
+//         ctx: &mut DiffContext<'a, S>,
+//         other: &Self,
+//     ) -> Result<(), S::Error> {
+//         ctx.push_field("a");
+//         self.a.diff(ctx, &other.a)?;
+//         ctx.pop_path_element()?;
+//         ctx.push_field("b");
+//         self.b.diff(ctx, &other.b)?;
+//         ctx.pop_path_element()?;
+//         //        ctx.push_field("s");
+//         //        self.s.diff(ctx, &other.s)?;
+//         //        ctx.pop_path_element();
+//         ctx.push_field("c");
+//         self.c.diff(ctx, &other.c)?;
+//         ctx.pop_path_element()?;
+//         Ok(())
+//     }
 
-    fn apply<'de, A>(
-        &mut self,
-        seq: &mut A,
-        ctx: &mut ApplyContext,
-    ) -> Result<(), <A as de::SeqAccess<'de>>::Error>
-    where
-        A: de::SeqAccess<'de>,
-    {
-        while let Some(DiffPathElementValue::Field(element)) = ctx.next_path_element(seq)? {
-            match element.as_ref() {
-                "a" => self.a.apply(seq, ctx)?,
-                "b" => self.b.apply(seq, ctx)?,
-                "c" => self.c.apply(seq, ctx)?,
-                _ => ctx.skip_value(seq)?,
-            }
-        }
-        Ok(())
-    }
-}
+//     fn apply<'de, A>(
+//         &mut self,
+//         seq: &mut A,
+//         ctx: &mut ApplyContext,
+//     ) -> Result<(), <A as de::SeqAccess<'de>>::Error>
+//     where
+//         A: de::SeqAccess<'de>,
+//     {
+//         while let Some(DiffPathElementValue::Field(element)) = ctx.next_path_element(seq)? {
+//             match element.as_ref() {
+//                 "a" => self.a.apply(seq, ctx)?,
+//                 "b" => self.b.apply(seq, ctx)?,
+//                 "c" => self.c.apply(seq, ctx)?,
+//                 _ => ctx.skip_value(seq)?,
+//             }
+//         }
+//         Ok(())
+//     }
+// }
 
-impl SerdeDiffable for MyInnerStruct {
-    fn diff<'a, S: SerializeSeq>(
-        &self,
-        ctx: &mut DiffContext<'a, S>,
-        other: &Self,
-    ) -> Result<(), S::Error> {
-        ctx.push_field("x");
-        self.x.diff(ctx, &other.x)?;
-        ctx.pop_field()?;
-        ctx.push_field("a_string");
-        self.a_string.diff(ctx, &other.a_string)?;
-        ctx.pop_field()?;
-        // ctx.push_field("string_list");
-        // self.string_list.diff(ctx, &other.string_list);
-        // ctx.pop_field();
-        Ok(())
-    }
-    //    fn apply<S: for<'de> Deserialize<'de>>(&mut self, ctx: &ApplyContext<S>) {
-    //
-    //    }
+// impl SerdeDiffable for MyInnerStruct {
+//     fn diff<'a, S: SerializeSeq>(
+//         &self,
+//         ctx: &mut DiffContext<'a, S>,
+//         other: &Self,
+//     ) -> Result<(), S::Error> {
+//         ctx.push_field("x");
+//         self.x.diff(ctx, &other.x)?;
+//         ctx.pop_path_element()?;
+//         ctx.push_field("a_string");
+//         self.a_string.diff(ctx, &other.a_string)?;
+//         ctx.pop_path_element()?;
+//         // ctx.push_field("string_list");
+//         // self.string_list.diff(ctx, &other.string_list);
+//         // ctx.pop_path_element();
+//         Ok(())
+//     }
+//     //    fn apply<S: for<'de> Deserialize<'de>>(&mut self, ctx: &ApplyContext<S>) {
+//     //
+//     //    }
 
-    fn apply<'de, A>(
-        &mut self,
-        seq: &mut A,
-        ctx: &mut ApplyContext,
-    ) -> Result<(), <A as de::SeqAccess<'de>>::Error>
-    where
-        A: de::SeqAccess<'de>,
-    {
-        while let Some(DiffPathElementValue::Field(element)) = ctx.next_path_element(seq)? {
-            match element.as_ref() {
-                "x" => self.x.apply(seq, ctx)?,
-                "a_string" => self.a_string.apply(seq, ctx)?,
-                _ => ctx.skip_value(seq)?,
-            }
-        }
-        Ok(())
-    }
-}
+//     fn apply<'de, A>(
+//         &mut self,
+//         seq: &mut A,
+//         ctx: &mut ApplyContext,
+//     ) -> Result<(), <A as de::SeqAccess<'de>>::Error>
+//     where
+//         A: de::SeqAccess<'de>,
+//     {
+//         while let Some(DiffPathElementValue::Field(element)) = ctx.next_path_element(seq)? {
+//             match element.as_ref() {
+//                 "x" => self.x.apply(seq, ctx)?,
+//                 "a_string" => self.a_string.apply(seq, ctx)?,
+//                 _ => ctx.skip_value(seq)?,
+//             }
+//         }
+//         Ok(())
+//     }
+// }
 
 fn main() {
     let (utf8_data, bincode_data) = {
@@ -686,8 +764,8 @@ fn main() {
         let mut serializer = serde_json::Serializer::new(&mut c);
         Diff::diff(&mut serializer, &old, &new).unwrap();
 
-        // let bincode_data = bincode::serialize(&Diff::serializable(&old, &new)).unwrap();
-        let bincode_data = vec![0];
+        let bincode_data = bincode::serialize(&Diff::serializable(&old, &new)).unwrap();
+        // let bincode_data = vec![0];
 
         let utf8_data = String::from_utf8(vec).unwrap();
 
@@ -707,12 +785,231 @@ fn main() {
             string_list: vec!["str1".to_string(), "str2".to_string()],
         },
     };
-    let c = std::io::Cursor::new(utf8_data.as_bytes());
-    let mut deserializer = serde_json::Deserializer::from_reader(c);
-    Apply::apply(&mut deserializer, &mut target).unwrap();
+    // let c = std::io::Cursor::new(utf8_data.as_bytes());
+    // let mut deserializer = serde_json::Deserializer::from_reader(c);
+    // Apply::apply(&mut deserializer, &mut target).unwrap();
 
-    // bincode::config()
-    //     .deserialize_seed(Apply::deserializable(&mut target), &bincode_data)
-    //     .unwrap();
+    bincode::config()
+        .deserialize_seed(Apply::deserializable(&mut target), &bincode_data)
+        .unwrap();
     println!("target {:?}", target);
+    println!(
+        "bincode size {} json size {}",
+        bincode_data.len(),
+        utf8_data.len()
+    );
+    println!("str {:?}", std::str::from_utf8(&bincode_data).unwrap());
+}
+
+struct CountingSerializer {
+    num_elements: usize,
+}
+
+#[derive(Debug)]
+struct SerializerError;
+impl std::fmt::Display for SerializerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        unimplemented!()
+    }
+}
+impl std::error::Error for SerializerError {
+    fn description(&self) -> &str {
+        ""
+    }
+    fn cause(&self) -> Option<&dyn std::error::Error> {
+        None
+    }
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        None
+    }
+}
+impl ser::Error for SerializerError {
+    fn custom<T>(msg: T) -> Self
+    where
+        T: std::fmt::Display,
+    {
+        SerializerError
+    }
+}
+
+impl<'a> ser::Serializer for &'a mut CountingSerializer {
+    type Ok = ();
+    type Error = SerializerError;
+
+    type SerializeSeq = Self;
+    type SerializeTuple = ser::Impossible<(), Self::Error>;
+    type SerializeTupleStruct = ser::Impossible<(), Self::Error>;
+    type SerializeTupleVariant = ser::Impossible<(), Self::Error>;
+    type SerializeMap = ser::Impossible<(), Self::Error>;
+    type SerializeStruct = ser::Impossible<(), Self::Error>;
+    type SerializeStructVariant = ser::Impossible<(), Self::Error>;
+
+    fn serialize_bool(self, v: bool) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_i8(self, v: i8) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_i16(self, v: i16) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_i32(self, v: i32) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_i64(self, v: i64) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_u8(self, v: u8) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_u16(self, v: u16) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_u32(self, v: u32) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_u64(self, v: u64) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_f32(self, v: f32) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_f64(self, v: f64) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_char(self, v: char) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_str(self, v: &str) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_bytes(self, v: &[u8]) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_none(self) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_some<T>(self, value: &T) -> Result<(), Self::Error>
+    where
+        T: ?Sized + Serialize,
+    {
+        unimplemented!()
+    }
+
+    fn serialize_unit(self) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_unit_struct(self, _name: &'static str) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_unit_variant(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        variant: &'static str,
+    ) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_newtype_struct<T>(self, _name: &'static str, value: &T) -> Result<(), Self::Error>
+    where
+        T: ?Sized + Serialize,
+    {
+        unimplemented!()
+    }
+
+    fn serialize_newtype_variant<T>(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        variant: &'static str,
+        value: &T,
+    ) -> Result<(), Self::Error>
+    where
+        T: ?Sized + Serialize,
+    {
+        unimplemented!()
+    }
+
+    fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
+        Ok(self)
+    }
+
+    fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple, Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_tuple_struct(
+        self,
+        _name: &'static str,
+        len: usize,
+    ) -> Result<Self::SerializeTupleStruct, Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_tuple_variant(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        variant: &'static str,
+        _len: usize,
+    ) -> Result<Self::SerializeTupleVariant, Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_struct(
+        self,
+        _name: &'static str,
+        len: usize,
+    ) -> Result<Self::SerializeStruct, Self::Error> {
+        unimplemented!()
+    }
+
+    fn serialize_struct_variant(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        variant: &'static str,
+        _len: usize,
+    ) -> Result<Self::SerializeStructVariant, Self::Error> {
+        unimplemented!()
+    }
+}
+
+impl<'a> ser::SerializeSeq for &'a mut CountingSerializer {
+    type Ok = ();
+    type Error = SerializerError;
+
+    fn serialize_element<T>(&mut self, value: &T) -> Result<(), Self::Error>
+    where
+        T: ?Sized + Serialize,
+    {
+        self.num_elements += 1;
+        Ok(())
+    }
+
+    fn end(self) -> Result<(), Self::Error> {
+        Ok(())
+    }
 }

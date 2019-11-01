@@ -18,7 +18,7 @@ pub struct StructDiffStructArgs {
 #[darling(attributes(serde_diffable))]
 pub struct StructDiffFieldArgs {
     ident: Option<syn::Ident>,
-    //ty: syn::Type,
+    ty: syn::Type,
 
     #[darling(default)]
     skip: bool,
@@ -28,9 +28,9 @@ impl StructDiffFieldArgs {
     pub fn ident(&self) -> &Option<syn::Ident> {
         return &self.ident
     }
-//    pub fn ty(&self) -> &syn::Type {
-//        return &self.ty
-//    }
+   pub fn ty(&self) -> &syn::Type {
+       return &self.ty
+   }
     pub fn skip(&self) -> bool {
         return self.skip
     }

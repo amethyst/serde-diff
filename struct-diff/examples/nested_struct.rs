@@ -68,7 +68,8 @@ fn main() {
         bincode::config()
             .deserialize_seed(Apply::deserializable(&mut target), &bincode_data)
             .unwrap();
-        println!("target {:?}", target);
+        println!("diff {:?} and {:?}", old, new);
+        println!("result {:?}", target);
     }
     println!(
         "bincode size {} json size {}",

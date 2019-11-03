@@ -1,4 +1,4 @@
-use crate as struct_diff;
+use crate as serde_diff;
 #[doc(hidden)]
 pub use serde as _serde;
 use serde::{
@@ -7,7 +7,7 @@ use serde::{
     Deserialize, Serialize, Serializer,
 };
 use std::borrow::Cow;
-pub use struct_diff_derive::SerdeDiffable;
+pub use serde_diff_derive::SerdeDiff;
 
 // NEXT STEPS:
 // - Decouple from serde_json as much as possible. We might need to use a "stream" format with
@@ -30,7 +30,7 @@ pub use struct_diff_derive::SerdeDiffable;
 // This is implemented as CountingSerializer
 
 /// Anything diffable implements this trait
-pub trait SerdeDiffable {
+pub trait SerdeDiff {
     /// Recursively walk the struct, invoking serialize_element on each member if the element is
     /// different. Returns whether anything changed.
     fn diff<'a, S: SerializeSeq>(
@@ -128,7 +128,7 @@ pub struct Diff<'a, 'b, T> {
     old: &'a T,
     new: &'b T,
 }
-impl<'a, 'b, T: SerdeDiffable + 'a + 'b> Diff<'a, 'b, T> {
+impl<'a, 'b, T: SerdeDiff + 'a + 'b> Diff<'a, 'b, T> {
     pub fn serializable(old: &'a T, new: &'b T) -> Self {
         Self { old, new }
     }
@@ -136,7 +136,7 @@ impl<'a, 'b, T: SerdeDiffable + 'a + 'b> Diff<'a, 'b, T> {
         Self::serializable(old, new).serialize(serializer)
     }
 }
-impl<'a, 'b, T: SerdeDiffable> Serialize for Diff<'a, 'b, T> {
+impl<'a, 'b, T: SerdeDiff> Serialize for Diff<'a, 'b, T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -165,10 +165,10 @@ impl<'a, 'b, T: SerdeDiffable> Serialize for Diff<'a, 'b, T> {
 }
 
 /// Deserializes a [Diff]
-pub struct Apply<'a, T: SerdeDiffable> {
+pub struct Apply<'a, T: SerdeDiff> {
     target: &'a mut T,
 }
-impl<'a, 'de, T: SerdeDiffable> Apply<'a, T> {
+impl<'a, 'de, T: SerdeDiff> Apply<'a, T> {
     pub fn deserializable(target: &'a mut T) -> Self {
         Self { target }
     }
@@ -182,7 +182,7 @@ impl<'a, 'de, T: SerdeDiffable> Apply<'a, T> {
         deserializer.deserialize_seq(Apply { target })
     }
 }
-impl<'a, 'de, T: SerdeDiffable> de::DeserializeSeed<'de> for Apply<'a, T> {
+impl<'a, 'de, T: SerdeDiff> de::DeserializeSeed<'de> for Apply<'a, T> {
     type Value = ();
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
@@ -192,7 +192,7 @@ impl<'a, 'de, T: SerdeDiffable> de::DeserializeSeed<'de> for Apply<'a, T> {
     }
 }
 
-impl<'a, 'de, T: SerdeDiffable> de::Visitor<'de> for Apply<'a, T> {
+impl<'a, 'de, T: SerdeDiff> de::Visitor<'de> for Apply<'a, T> {
     type Value = ();
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(formatter, "a sequence containing DiffCommands")
@@ -555,7 +555,7 @@ pub enum DiffPathElementValue<'a> {
     CollectionIndex(usize),
     AddToCollection,
 }
-impl<T: SerdeDiffable + Serialize + for<'a> Deserialize<'a>> SerdeDiffable for Vec<T> {
+impl<T: SerdeDiff + Serialize + for<'a> Deserialize<'a>> SerdeDiff for Vec<T> {
     fn diff<'a, S: SerializeSeq>(
         &self,
         ctx: &mut DiffContext<'a, S>,
@@ -590,7 +590,7 @@ impl<T: SerdeDiffable + Serialize + for<'a> Deserialize<'a>> SerdeDiffable for V
                 }
                 (Some(self_item), Some(other_item)) => {
                     ctx.push_collection_index(idx);
-                    if <T as SerdeDiffable>::diff(self_item, ctx, other_item)? {
+                    if <T as SerdeDiff>::diff(self_item, ctx, other_item)? {
                         need_exit = true;
                         changed = true;
                     }
@@ -625,7 +625,7 @@ impl<T: SerdeDiffable + Serialize + for<'a> Deserialize<'a>> SerdeDiffable for V
                 }
                 Enter(CollectionIndex(idx)) => {
                     if let Some(value_ref) = self.get_mut(idx) {
-                        changed |= <T as SerdeDiffable>::apply(value_ref, seq, ctx)?;
+                        changed |= <T as SerdeDiff>::apply(value_ref, seq, ctx)?;
                     } else {
                         ctx.skip_value(seq)?;
                     }
@@ -653,16 +653,16 @@ impl<T: SerdeDiffable + Serialize + for<'a> Deserialize<'a>> SerdeDiffable for V
         Ok(changed)
     }
 }
-/// Implements SerdeDiffable on a type given that it impls Serialize + Deserialize + PartialEq.
-/// This makes the type a "terminal" type in the SerdeDiffable hierarchy, meaning deeper inspection
-/// will not be possible. Use the SerdeDiffable derive macro for
+/// Implements SerdeDiff on a type given that it impls Serialize + Deserialize + PartialEq.
+/// This makes the type a "terminal" type in the SerdeDiff hierarchy, meaning deeper inspection
+/// will not be possible. Use the SerdeDiff derive macro for
 #[macro_export]
-macro_rules! simple_serde_diffable {
+macro_rules! simple_serde_diff {
     ($t:ty) => {
-        impl SerdeDiffable for $t {
-            fn diff<'a, S: struct_diff::_serde::ser::SerializeSeq>(
+        impl SerdeDiff for $t {
+            fn diff<'a, S: serde_diff::_serde::ser::SerializeSeq>(
                 &self,
-                ctx: &mut struct_diff::DiffContext<'a, S>,
+                ctx: &mut serde_diff::DiffContext<'a, S>,
                 other: &Self,
             ) -> Result<bool, S::Error> {
                 if self != other {
@@ -676,10 +676,10 @@ macro_rules! simple_serde_diffable {
             fn apply<'de, A>(
                 &mut self,
                 seq: &mut A,
-                ctx: &mut struct_diff::ApplyContext,
-            ) -> Result<bool, <A as struct_diff::_serde::de::SeqAccess<'de>>::Error>
+                ctx: &mut serde_diff::ApplyContext,
+            ) -> Result<bool, <A as serde_diff::_serde::de::SeqAccess<'de>>::Error>
             where
-                A: struct_diff::_serde::de::SeqAccess<'de>,
+                A: serde_diff::_serde::de::SeqAccess<'de>,
             {
                 ctx.read_value(seq, self)
             }
@@ -687,43 +687,43 @@ macro_rules! simple_serde_diffable {
     };
 }
 
-// Implement `SerdeDiffable` for primitive types and types defined in the standard library.
-simple_serde_diffable!(bool);
-simple_serde_diffable!(isize);
-simple_serde_diffable!(i8);
-simple_serde_diffable!(i16);
-simple_serde_diffable!(i32);
-simple_serde_diffable!(i64);
-simple_serde_diffable!(usize);
-simple_serde_diffable!(u8);
-simple_serde_diffable!(u16);
-simple_serde_diffable!(u32);
-simple_serde_diffable!(u64);
-simple_serde_diffable!(i128);
-simple_serde_diffable!(u128);
-simple_serde_diffable!(f32);
-simple_serde_diffable!(f64);
-simple_serde_diffable!(char);
-simple_serde_diffable!(String);
-simple_serde_diffable!(std::ffi::CString);
-simple_serde_diffable!(std::ffi::OsString);
-simple_serde_diffable!(std::num::NonZeroU8);
-simple_serde_diffable!(std::num::NonZeroU16);
-simple_serde_diffable!(std::num::NonZeroU32);
-simple_serde_diffable!(std::num::NonZeroU64);
-simple_serde_diffable!(std::time::Duration);
-simple_serde_diffable!(std::time::SystemTime);
-simple_serde_diffable!(std::net::IpAddr);
-simple_serde_diffable!(std::net::Ipv4Addr);
-simple_serde_diffable!(std::net::Ipv6Addr);
-simple_serde_diffable!(std::net::SocketAddr);
-simple_serde_diffable!(std::net::SocketAddrV4);
-simple_serde_diffable!(std::net::SocketAddrV6);
-simple_serde_diffable!(std::path::PathBuf);
+// Implement `SerdeDiff` for primitive types and types defined in the standard library.
+simple_serde_diff!(bool);
+simple_serde_diff!(isize);
+simple_serde_diff!(i8);
+simple_serde_diff!(i16);
+simple_serde_diff!(i32);
+simple_serde_diff!(i64);
+simple_serde_diff!(usize);
+simple_serde_diff!(u8);
+simple_serde_diff!(u16);
+simple_serde_diff!(u32);
+simple_serde_diff!(u64);
+simple_serde_diff!(i128);
+simple_serde_diff!(u128);
+simple_serde_diff!(f32);
+simple_serde_diff!(f64);
+simple_serde_diff!(char);
+simple_serde_diff!(String);
+simple_serde_diff!(std::ffi::CString);
+simple_serde_diff!(std::ffi::OsString);
+simple_serde_diff!(std::num::NonZeroU8);
+simple_serde_diff!(std::num::NonZeroU16);
+simple_serde_diff!(std::num::NonZeroU32);
+simple_serde_diff!(std::num::NonZeroU64);
+simple_serde_diff!(std::time::Duration);
+simple_serde_diff!(std::time::SystemTime);
+simple_serde_diff!(std::net::IpAddr);
+simple_serde_diff!(std::net::Ipv4Addr);
+simple_serde_diff!(std::net::Ipv6Addr);
+simple_serde_diff!(std::net::SocketAddr);
+simple_serde_diff!(std::net::SocketAddrV4);
+simple_serde_diff!(std::net::SocketAddrV6);
+simple_serde_diff!(std::path::PathBuf);
 
 #[allow(dead_code)]
 type Unit = ();
-simple_serde_diffable!(Unit);
+simple_serde_diff!(Unit);
 
 struct CountingSerializer {
     num_elements: usize,

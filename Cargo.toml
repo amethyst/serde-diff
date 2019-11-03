@@ -1,7 +1,7 @@
 [package]
-name = "struct-diff"
+name = "serde-diff"
 version = "0.1.0"
-authors = ["Philip Degarmo <aclysma@gmail.com>", "Karl Bergström <karl.anton.bergstrom@gmail.com"]
+authors = ["Karl Bergström <karl.anton.bergstrom@gmail.com", "Philip Degarmo <aclysma@gmail.com>"]
 readme = "README.md"
 exclude = ["examples/*"]
 license = "Apache-2.0+MIT"
@@ -16,7 +16,7 @@ maintenance = { status = "experimental" }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-struct-diff-derive = { path = "struct-diff-derive" }
+serde-diff-derive = { path = "struct-diff-derive" }
 serde =  { version = "1", features = [ "derive" ] }
 serde_derive = { version = "1", features = ["deserialize_in_place"]}
 

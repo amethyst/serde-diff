@@ -1,14 +1,14 @@
 [package]
-name = "struct-diff-derive"
+name = "serde-diff-derive"
 version = "0.1.0"
-authors = ["Philip Degarmo <aclysma@gmail.com>"]
+authors = ["Karl Bergström <karl.anton.bergstrom@gmail.com", "Philip Degarmo <aclysma@gmail.com>"]
 edition = "2018"
 
 [badges]
 maintenance = { status = "experimental" }
 
 [lib]
-name="struct_diff_derive"
+name="serde_diff_derive"
 proc-macro = true
 
 [dependencies]

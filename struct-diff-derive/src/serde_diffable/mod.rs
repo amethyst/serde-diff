@@ -81,7 +81,7 @@ fn generate(
             {
                 {
                     ctx.push_field(#ident_as_str);
-                    <#ty as SerdeDiffable>::diff(&self.#ident, ctx, &other.#ident)?;
+                    __changed__ |= <#ty as struct_diff::SerdeDiffable>::diff(&self.#ident, ctx, &other.#ident)?;
                     ctx.pop_path_element()?;
                 }
             }
@@ -89,9 +89,10 @@ fn generate(
     }
 
     let diff_fn = quote! {
-        fn diff<'a, S: serde::ser::SerializeSeq>(&self, ctx: &mut struct_diff::DiffContext<'a, S>, other: &Self) -> Result<(), S::Error> {
+        fn diff<'a, S: struct_diff::_serde::ser::SerializeSeq>(&self, ctx: &mut struct_diff::DiffContext<'a, S>, other: &Self) -> Result<bool, S::Error> {
+            let mut __changed__ = false;
             #(#diff_fn_field_handlers)*
-            Ok(())
+            Ok(__changed__)
         }
     };
 
@@ -107,7 +108,7 @@ fn generate(
         let ty = pf.field_args.ty();
 
         apply_fn_field_handlers.push(quote!(
-            #ident_as_str => <#ty as struct_diff::SerdeDiffable>::apply(&mut self.#ident, seq, ctx)?,
+            #ident_as_str => __changed__ |= <#ty as struct_diff::SerdeDiffable>::apply(&mut self.#ident, seq, ctx)?,
         ));
     }
 
@@ -116,16 +117,17 @@ fn generate(
             &mut self,
             seq: &mut A,
             ctx: &mut struct_diff::ApplyContext,
-        ) -> Result<(), <A as serde::de::SeqAccess<'de>>::Error>
+        ) -> Result<bool, <A as struct_diff::_serde::de::SeqAccess<'de>>::Error>
         where
-            A: serde::de::SeqAccess<'de>, {
+            A: struct_diff::_serde::de::SeqAccess<'de>, {
+            let mut __changed__ = false;
             while let Some(struct_diff::DiffPathElementValue::Field(element)) = ctx.next_path_element(seq)? {
                 match element.as_ref() {
                     #(#apply_fn_field_handlers)*
                     _ => ctx.skip_value(seq)?,
                 }
             }
-            Ok(())
+            Ok(__changed__)
         }
     };
 

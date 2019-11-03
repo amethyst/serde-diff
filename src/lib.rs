@@ -32,18 +32,18 @@ pub use struct_diff_derive::SerdeDiffable;
 /// Anything diffable implements this trait
 pub trait SerdeDiffable {
     /// Recursively walk the struct, invoking serialize_element on each member if the element is
-    /// different.
+    /// different. Returns whether anything changed.
     fn diff<'a, S: SerializeSeq>(
         &self,
         ctx: &mut DiffContext<'a, S>,
         other: &Self,
-    ) -> Result<(), S::Error>;
+    ) -> Result<bool, S::Error>;
 
     fn apply<'de, A>(
         &mut self,
         seq: &mut A,
         ctx: &mut ApplyContext,
-    ) -> Result<(), <A as de::SeqAccess<'de>>::Error>
+    ) -> Result<bool, <A as de::SeqAccess<'de>>::Error>
     where
         A: de::SeqAccess<'de>;
 }
@@ -65,6 +65,13 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
     pub fn push_field(&mut self, field_name: &'static str) {
         self.field_stack
             .push(DiffPathElementValue::Field(Cow::Borrowed(field_name)));
+    }
+    pub fn push_collection_index(&mut self, idx: usize) {
+        self.field_stack
+            .push(DiffPathElementValue::CollectionIndex(idx));
+    }
+    pub fn push_collection_add(&mut self) {
+        self.field_stack.push(DiffPathElementValue::AddToCollection);
     }
     /// Called when we finish visiting a field. See `push_field` for details
     pub fn pop_path_element(&mut self) -> Result<(), S::Error> {
@@ -509,7 +516,7 @@ impl<'de> de::DeserializeSeed<'de> for DiffCommandIgnoreValue {
 }
 
 #[doc(hidden)]
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub enum DiffCommandRef<'a, T: Serialize> {
     /// Enter a path element
     Enter(DiffPathElementValue<'a>),
@@ -522,7 +529,7 @@ pub enum DiffCommandRef<'a, T: Serialize> {
     Exit,
 }
 #[doc(hidden)]
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub enum DiffCommandValue<'a, T> {
     // Enter a path element
     #[serde(borrow)]
@@ -540,7 +547,7 @@ pub enum DiffCommandValue<'a, T> {
 }
 
 #[doc(hidden)]
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub enum DiffPathElementValue<'a> {
     /// A struct field
     #[serde(borrow)]
@@ -548,16 +555,17 @@ pub enum DiffPathElementValue<'a> {
     CollectionIndex(usize),
     AddToCollection,
 }
-impl<T: PartialEq + Serialize + for<'a> Deserialize<'a>> SerdeDiffable for Vec<T> {
+impl<T: SerdeDiffable + Serialize + for<'a> Deserialize<'a>> SerdeDiffable for Vec<T> {
     fn diff<'a, S: SerializeSeq>(
         &self,
         ctx: &mut DiffContext<'a, S>,
         other: &Self,
-    ) -> Result<(), S::Error> {
+    ) -> Result<bool, S::Error> {
         let mut self_iter = self.iter();
         let mut other_iter = other.iter();
         let mut idx = 0;
         let mut need_exit = false;
+        let mut changed = false;
         loop {
             let self_item = self_iter.next();
             let other_item = other_iter.next();
@@ -569,24 +577,24 @@ impl<T: PartialEq + Serialize + for<'a> Deserialize<'a>> SerdeDiffable for Vec<T
                         num_to_remove += 1;
                     }
                     ctx.save_command::<()>(&DiffCommandRef::Remove(num_to_remove), true)?;
+                    changed = true;
                 }
                 (None, Some(other_item)) => {
-                    need_exit = true;
                     ctx.save_command::<()>(
                         &DiffCommandRef::Enter(DiffPathElementValue::AddToCollection),
                         false,
                     )?;
                     ctx.save_command(&DiffCommandRef::Value(other_item), true)?;
+                    need_exit = true;
+                    changed = true;
                 }
                 (Some(self_item), Some(other_item)) => {
-                    if self_item != other_item {
+                    ctx.push_collection_index(idx);
+                    if <T as SerdeDiffable>::diff(self_item, ctx, other_item)? {
                         need_exit = true;
-                        ctx.save_command::<()>(
-                            &DiffCommandRef::Enter(DiffPathElementValue::CollectionIndex(idx)),
-                            false,
-                        )?;
-                        ctx.save_command(&DiffCommandRef::Value(other_item), true)?;
+                        changed = true;
                     }
+                    ctx.pop_path_element()?;
                 }
             }
             idx += 1;
@@ -594,17 +602,18 @@ impl<T: PartialEq + Serialize + for<'a> Deserialize<'a>> SerdeDiffable for Vec<T
         if need_exit {
             ctx.save_command::<()>(&DiffCommandRef::Exit, true)?;
         }
-        Ok(())
+        Ok(changed)
     }
 
     fn apply<'de, A>(
         &mut self,
         seq: &mut A,
         ctx: &mut ApplyContext,
-    ) -> Result<(), <A as de::SeqAccess<'de>>::Error>
+    ) -> Result<bool, <A as de::SeqAccess<'de>>::Error>
     where
         A: de::SeqAccess<'de>,
     {
+        let mut changed = false;
         while let Some(cmd) = ctx.read_next_command::<A, T>(seq)? {
             use DiffCommandValue::*;
             use DiffPathElementValue::*;
@@ -616,7 +625,7 @@ impl<T: PartialEq + Serialize + for<'a> Deserialize<'a>> SerdeDiffable for Vec<T
                 }
                 Enter(CollectionIndex(idx)) => {
                     if let Some(value_ref) = self.get_mut(idx) {
-                        ctx.read_value(seq, value_ref)?;
+                        changed |= <T as SerdeDiffable>::apply(value_ref, seq, ctx)?;
                     } else {
                         ctx.skip_value(seq)?;
                     }
@@ -626,6 +635,7 @@ impl<T: PartialEq + Serialize + for<'a> Deserialize<'a>> SerdeDiffable for Vec<T
                         .read_next_command(seq)?
                         .expect("Expected value after AddToCollection")
                     {
+                        changed = true;
                         self.push(v);
                     } else {
                         panic!("Expected value after AddToCollection");
@@ -634,12 +644,13 @@ impl<T: PartialEq + Serialize + for<'a> Deserialize<'a>> SerdeDiffable for Vec<T
                 Remove(num_elements) => {
                     let new_length = self.len().saturating_sub(num_elements);
                     self.truncate(new_length);
+                    changed = true;
                     break;
                 }
                 _ => break,
             }
         }
-        Ok(())
+        Ok(changed)
     }
 }
 /// Implements SerdeDiffable on a type given that it impls Serialize + Deserialize + PartialEq.
@@ -653,24 +664,24 @@ macro_rules! simple_serde_diffable {
                 &self,
                 ctx: &mut struct_diff::DiffContext<'a, S>,
                 other: &Self,
-            ) -> Result<(), S::Error> {
+            ) -> Result<bool, S::Error> {
                 if self != other {
                     ctx.save_value(other)?;
+                    Ok(true)
+                } else {
+                    Ok(false)
                 }
-
-                Ok(())
             }
 
             fn apply<'de, A>(
                 &mut self,
                 seq: &mut A,
                 ctx: &mut struct_diff::ApplyContext,
-            ) -> Result<(), <A as struct_diff::_serde::de::SeqAccess<'de>>::Error>
+            ) -> Result<bool, <A as struct_diff::_serde::de::SeqAccess<'de>>::Error>
             where
                 A: struct_diff::_serde::de::SeqAccess<'de>,
             {
-                ctx.read_value(seq, self)?;
-                Ok(())
+                ctx.read_value(seq, self)
             }
         }
     };

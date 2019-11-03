@@ -5,12 +5,18 @@ use struct_diff::{simple_serde_diffable, Apply, Diff, SerdeDiffable};
 struct SimpleWrapper(u32);
 simple_serde_diffable!(SimpleWrapper);
 
-#[derive(SerdeDiffable, Clone, PartialEq, Serialize, Deserialize, Debug)]
+#[derive(SerdeDiffable, Serialize, Deserialize, Clone, Debug)]
+struct MySimpleStruct {
+    val: u32,
+}
+
+#[derive(SerdeDiffable, Clone, Serialize, Deserialize, Debug)]
 struct MyInnerStruct {
     x: f32,
     a_string: String,
     string_list: Vec<String>,
     string_list2: Vec<String>,
+    nested_vec: Vec<MySimpleStruct>,
 }
 
 #[derive(SerdeDiffable, Clone, Serialize, Deserialize, Debug)]
@@ -33,6 +39,7 @@ fn main() {
             a_string: "my string".to_string(),
             string_list: vec!["str1".to_string(), "str3".to_string()],
             string_list2: vec!["str6".to_string(), "str7".to_string()],
+            nested_vec: vec![MySimpleStruct { val: 8 }],
         },
         simple: SimpleWrapper(10),
     };
@@ -47,8 +54,9 @@ fn main() {
             a_string: "my other string".to_string(),
             string_list: vec!["str1".to_string(), "str2".to_string(), "str3".to_string()],
             string_list2: vec!["str6".to_string()],
+            nested_vec: vec![MySimpleStruct { val: 6 }],
         },
-        simple: SimpleWrapper(10),
+        simple: SimpleWrapper(4),
     };
     let json_data = serde_json::to_string(&Diff::serializable(&old, &new)).unwrap();
     let bincode_data = bincode::serialize(&Diff::serializable(&old, &new)).unwrap();
@@ -62,6 +70,7 @@ fn main() {
             a_string: "my string".to_string(),
             string_list: vec!["str1".to_string(), "str5".to_string()],
             string_list2: vec!["str6".to_string(), "str7".to_string()],
+            nested_vec: vec![MySimpleStruct { val: 3 }],
         },
         simple: SimpleWrapper(10),
     };
@@ -76,8 +85,8 @@ fn main() {
         bincode::config()
             .deserialize_seed(Apply::deserializable(&mut target), &bincode_data)
             .unwrap();
-        println!("diff {:?} and {:?}", old, new);
-        println!("result {:?}", target);
+        println!("diff {:#?} and {:#?}", old, new);
+        println!("result {:#?}", target);
     }
     println!(
         "bincode size {} json size {}",

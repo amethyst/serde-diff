@@ -1,4 +1,3 @@
-
 extern crate proc_macro;
 
 mod args;
@@ -6,7 +5,6 @@ mod args;
 use quote::quote;
 
 pub fn diffable_macro_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-
     use darling::FromDeriveInput;
 
     let input = syn::parse_macro_input!(input as syn::DeriveInput);
@@ -14,12 +12,12 @@ pub fn diffable_macro_derive(input: proc_macro::TokenStream) -> proc_macro::Toke
     let parsed_fields = parse_fields(&input);
 
     // Check all parsed fields for any errors that may have occurred
-    let mut ok_fields : Vec<ParsedField> = vec![];
+    let mut ok_fields: Vec<ParsedField> = vec![];
     let mut errors = vec![];
     for pf in parsed_fields {
         match pf {
             Ok(value) => ok_fields.push(value),
-            Err(e) => errors.push(e)
+            Err(e) => errors.push(e),
         }
     }
 
@@ -32,34 +30,22 @@ pub fn diffable_macro_derive(input: proc_macro::TokenStream) -> proc_macro::Toke
     generate(&input, struct_args, ok_fields)
 }
 
-fn parse_field(
-    f: &syn::Field,
-) -> Result<ParsedField, darling::Error>
-{
+fn parse_field(f: &syn::Field) -> Result<ParsedField, darling::Error> {
     //TODO: Unwrapping is less clear, figure out how to return
     use darling::FromField;
     let field_args = args::StructDiffFieldArgs::from_field(&f)?;
 
-    Ok(ParsedField {
-        field_args
-    })
+    Ok(ParsedField { field_args })
 }
 
 fn parse_fields(input: &syn::DeriveInput) -> Vec<Result<ParsedField, darling::Error>> {
-
     use syn::Data;
     use syn::Fields;
 
     match input.data {
         Data::Struct(ref data) => {
             match data.fields {
-                Fields::Named(ref fields) => {
-                    fields
-                        .named
-                        .iter()
-                        .map(|f| parse_field(&f))
-                        .collect()
-                }
+                Fields::Named(ref fields) => fields.named.iter().map(|f| parse_field(&f)).collect(),
                 //Fields::Unit => ,
                 _ => unimplemented!(),
             }
@@ -77,8 +63,7 @@ fn generate(
     _input: &syn::DeriveInput,
     struct_args: args::StructDiffStructArgs,
     parsed_fields: Vec<ParsedField>,
-) -> proc_macro::TokenStream
-{
+) -> proc_macro::TokenStream {
     //let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
     let mut diff_fn_field_handlers = vec![];
@@ -92,19 +77,19 @@ fn generate(
         let ident_as_str = quote!(#ident).to_string();
         let ty = pf.field_args.ty();
 
-        diff_fn_field_handlers.push(quote!{
+        diff_fn_field_handlers.push(quote! {
             {
                 {
                     ctx.push_field(#ident_as_str);
                     <#ty as SerdeDiffable>::diff(&self.#ident, ctx, &other.#ident)?;
-                    ctx.pop_path_element();
+                    ctx.pop_path_element()?;
                 }
             }
         });
     }
 
     let diff_fn = quote! {
-        fn diff<'a, S: SerializeSeq>(&self, ctx: &mut DiffContext<'a, S>, other: &Self) -> Result<(), S::Error> {
+        fn diff<'a, S: serde::ser::SerializeSeq>(&self, ctx: &mut struct_diff::DiffContext<'a, S>, other: &Self) -> Result<(), S::Error> {
             #(#diff_fn_field_handlers)*
             Ok(())
         }
@@ -122,7 +107,7 @@ fn generate(
         let ty = pf.field_args.ty();
 
         apply_fn_field_handlers.push(quote!(
-            #ident_as_str => <#ty as SerdeDiffable>::apply(&mut self.#ident, seq, ctx)?,
+            #ident_as_str => <#ty as struct_diff::SerdeDiffable>::apply(&mut self.#ident, seq, ctx)?,
         ));
     }
 
@@ -130,11 +115,11 @@ fn generate(
         fn apply<'de, A>(
             &mut self,
             seq: &mut A,
-            ctx: &mut ApplyContext,
-        ) -> Result<(), <A as de::SeqAccess<'de>>::Error>
+            ctx: &mut struct_diff::ApplyContext,
+        ) -> Result<(), <A as serde::de::SeqAccess<'de>>::Error>
         where
-            A: de::SeqAccess<'de>, {
-            while let Some(DiffPathElementValue::Field(element)) = ctx.next_path_element(seq)? {
+            A: serde::de::SeqAccess<'de>, {
+            while let Some(struct_diff::DiffPathElementValue::Field(element)) = ctx.next_path_element(seq)? {
                 match element.as_ref() {
                     #(#apply_fn_field_handlers)*
                     _ => ctx.skip_value(seq)?,
@@ -155,5 +140,5 @@ fn generate(
 
     return proc_macro::TokenStream::from(quote! {
         #diff_impl
-    })
+    });
 }

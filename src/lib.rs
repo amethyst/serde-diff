@@ -6,8 +6,8 @@ use serde::{
     ser::{self, SerializeSeq},
     Deserialize, Serialize, Serializer,
 };
-use std::borrow::Cow;
 pub use serde_diff_derive::SerdeDiff;
+use std::borrow::Cow;
 
 // NEXT STEPS:
 // - Decouple from serde_json as much as possible. We might need to use a "stream" format with
@@ -146,8 +146,9 @@ impl<'a, 'b, T: SerdeDiff> Serialize for Diff<'a, 'b, T> {
         S: Serializer,
     {
         // Count the number of elements
-        //TODO: This may only be needed for certain serializers like bincode.
-        let num_elements = {
+        // This may only be needed for certain serializers like bincode,
+        // so we assume that it's only required if the serializer format is not human readable.
+        let num_elements = if !serializer.is_human_readable() {
             let mut serializer = CountingSerializer { num_elements: 0 };
             let mut seq = serializer.serialize_seq(None).unwrap();
             let mut ctx = DiffContext {
@@ -157,11 +158,13 @@ impl<'a, 'b, T: SerdeDiff> Serialize for Diff<'a, 'b, T> {
             };
             self.old.diff(&mut ctx, &self.new).unwrap();
             seq.end().unwrap();
-            serializer.num_elements
+            Some(serializer.num_elements)
+        } else {
+            None
         };
 
         // Setup the context, starting a sequence on the serializer
-        let mut seq = serializer.serialize_seq(Some(num_elements))?;
+        let mut seq = serializer.serialize_seq(num_elements)?;
         let mut ctx = DiffContext {
             field_stack: Vec::new(),
             serializer: &mut seq,

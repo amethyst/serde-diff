@@ -32,13 +32,15 @@ pub use serde_diff_derive::SerdeDiff;
 /// Anything diffable implements this trait
 pub trait SerdeDiff {
     /// Recursively walk the struct, invoking serialize_element on each member if the element is
-    /// different. Returns whether anything changed.
+    /// different. Returns true if any changes exist, otherwise false. After this call, the
+    /// DiffContext will contain the data that has changed.
     fn diff<'a, S: SerializeSeq>(
         &self,
         ctx: &mut DiffContext<'a, S>,
         other: &Self,
     ) -> Result<bool, S::Error>;
 
+    /// Applies the diff to the struct. Returns true if the struct was changed, otherwise false.
     fn apply<'de, A>(
         &mut self,
         seq: &mut A,
@@ -51,6 +53,8 @@ pub trait SerdeDiff {
 /// Used during a diff operation for transient data used during the diff
 #[doc(hidden)]
 pub struct DiffContext<'a, S: SerializeSeq> {
+    /// As we descend into fields recursively, the field names (or other "placement" indicators like
+    /// array indexes) are pushed and popped to/from this stack
     field_stack: Vec<DiffPathElementValue<'a>>,
     /// Reference to the serializer used to save the data
     serializer: &'a mut S,
@@ -66,10 +70,12 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
         self.field_stack
             .push(DiffPathElementValue::Field(Cow::Borrowed(field_name)));
     }
+    /// Called when we visit an element within an indexed collection
     pub fn push_collection_index(&mut self, idx: usize) {
         self.field_stack
             .push(DiffPathElementValue::CollectionIndex(idx));
     }
+    /// Called when we visit an element within a collection that is new
     pub fn push_collection_add(&mut self) {
         self.field_stack.push(DiffPathElementValue::AddToCollection);
     }
@@ -93,16 +99,7 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
 
     /// Stores a value for an element that has previously been pushed using push_field.
     pub fn save_value<T: Serialize>(&mut self, value: &T) -> Result<(), S::Error> {
-        if !self.field_stack.is_empty() {
-            // flush buffered fields as Enter commands
-            for field in self.field_stack.drain(0..self.field_stack.len()) {
-                self.serializer
-                    .serialize_element(&DiffCommandRef::<()>::Enter(field))?;
-            }
-        }
-        self.implicit_exit_written = true;
-        let cmd = DiffCommandRef::Value(value);
-        self.serializer.serialize_element(&cmd)
+        self.save_command(&DiffCommandRef::Value(value), true)
     }
     /// Stores an arbitrary DiffCommand to be handled by the type.
     /// Any custom sequence of DiffCommands must be followed by Exit.
@@ -123,15 +120,22 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
     }
 }
 
-/// Serializes the difference between two values of a type
+/// A serializable structure that will produce a sequence of diff commands when serialized.
+/// You could create this struct and pass it to a serializer, or use the convenience method diff
+/// to pass your serializer along with old/new values to generate the diff from
 pub struct Diff<'a, 'b, T> {
     old: &'a T,
     new: &'b T,
 }
 impl<'a, 'b, T: SerdeDiff + 'a + 'b> Diff<'a, 'b, T> {
+    /// Create a serializable Diff, which when serialized will write the differences between the old
+    /// and new value into the serializer in the form of a sequence of diff commands
     pub fn serializable(old: &'a T, new: &'b T) -> Self {
         Self { old, new }
     }
+
+    /// Writes the differences between the old and new value into the given serializer in the form
+    /// of a sequence of diff commands
     pub fn diff<S: Serializer>(serializer: S, old: &'a T, new: &'b T) -> Result<S::Ok, S::Error> {
         Self::serializable(old, new).serialize(serializer)
     }
@@ -141,6 +145,8 @@ impl<'a, 'b, T: SerdeDiff> Serialize for Diff<'a, 'b, T> {
     where
         S: Serializer,
     {
+        // Count the number of elements
+        //TODO: This may only be needed for certain serializers like bincode.
         let num_elements = {
             let mut serializer = CountingSerializer { num_elements: 0 };
             let mut seq = serializer.serialize_seq(None).unwrap();
@@ -153,25 +159,36 @@ impl<'a, 'b, T: SerdeDiff> Serialize for Diff<'a, 'b, T> {
             seq.end().unwrap();
             serializer.num_elements
         };
+
+        // Setup the context, starting a sequence on the serializer
         let mut seq = serializer.serialize_seq(Some(num_elements))?;
         let mut ctx = DiffContext {
             field_stack: Vec::new(),
             serializer: &mut seq,
             implicit_exit_written: false,
         };
+
+        // Do the actual comparison, writing diff commands (see DiffCommandRef, DiffCommandValue)
+        // into the sequence
         self.old.diff(&mut ctx, &self.new)?;
+
+        // End the sequence on the serializer
         Ok(seq.end()?)
     }
 }
 
-/// Deserializes a [Diff]
+/// A deserializable structure that will apply a sequence of diff commands to the target
 pub struct Apply<'a, T: SerdeDiff> {
     target: &'a mut T,
 }
 impl<'a, 'de, T: SerdeDiff> Apply<'a, T> {
+    /// Create a deserializable apply, where the given target will be changed when the resulting
+    /// Apply struct is deserialized
     pub fn deserializable(target: &'a mut T) -> Self {
         Self { target }
     }
+
+    /// Applies a sequence of diff commands to the target, as read by the deserializer
     pub fn apply<D>(
         deserializer: D,
         target: &mut T,
@@ -725,18 +742,21 @@ simple_serde_diff!(std::path::PathBuf);
 type Unit = ();
 simple_serde_diff!(Unit);
 
+/// This is a serializer that counts the elements in a sequence
 struct CountingSerializer {
     num_elements: usize,
 }
 
+/// This is a dummy error type for CountingSerializer. Currently we don't expect the serializer
+/// to fail, so it's empty for now
 #[derive(Debug)]
-struct SerializerError;
-impl std::fmt::Display for SerializerError {
+struct CountingSerializerError;
+impl std::fmt::Display for CountingSerializerError {
     fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         unimplemented!()
     }
 }
-impl std::error::Error for SerializerError {
+impl std::error::Error for CountingSerializerError {
     fn description(&self) -> &str {
         ""
     }
@@ -747,18 +767,18 @@ impl std::error::Error for SerializerError {
         None
     }
 }
-impl ser::Error for SerializerError {
+impl ser::Error for CountingSerializerError {
     fn custom<T>(_msg: T) -> Self
     where
         T: std::fmt::Display,
     {
-        SerializerError
+        CountingSerializerError
     }
 }
 
 impl<'a> ser::Serializer for &'a mut CountingSerializer {
     type Ok = ();
-    type Error = SerializerError;
+    type Error = CountingSerializerError;
 
     type SerializeSeq = Self;
     type SerializeTuple = ser::Impossible<(), Self::Error>;
@@ -923,7 +943,7 @@ impl<'a> ser::Serializer for &'a mut CountingSerializer {
 
 impl<'a> ser::SerializeSeq for &'a mut CountingSerializer {
     type Ok = ();
-    type Error = SerializerError;
+    type Error = CountingSerializerError;
 
     fn serialize_element<T>(&mut self, _value: &T) -> Result<(), Self::Error>
     where

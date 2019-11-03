@@ -64,7 +64,9 @@ fn main() {
         simple: SimpleWrapper(4),
     };
 
-    // Create a diff of the to structures
+    // Create a diff of the to structures. This just stores a reference to the old/new values
+    // and doesn't walk any fields yet. The actual diff will be performed when this struct is
+    // serialized
     let diff = Diff::serializable(&old, &new);
 
     // Serialize into a couple different formats

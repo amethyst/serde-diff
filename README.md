@@ -6,11 +6,22 @@ TODO: Build Status and crates.io badges
 
 ## Status
 
-Just started
+Works for most basic use-cases. Includes derive macro, some standard library type implementations and deep serde integration. Supports both text and binary serde formats.
 
 ## Usage
+bincode
+```
+let bincode_data = bincode::serialize(&Diff::serializable(&old, &new)).unwrap();
+bincode::config()
+        .deserialize_seed(Apply::deserializable(&mut target), &bincode_data)
+        .unwrap();
+```
+serde_json
+```
+        let mut deserializer = serde_json::Deserializer::from_str(&json_data);
+        Apply::apply(&mut deserializer, &mut target).unwrap();
+```
 
-TODO
 
 ## Contribution
 

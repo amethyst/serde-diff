@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
-use struct_diff::{Apply, Diff, SerdeDiffable};
+use struct_diff::{simple_serde_diffable, Apply, Diff, SerdeDiffable};
+
+#[derive(PartialEq, Serialize, Deserialize, Clone, Debug)]
+struct SimpleWrapper(u32);
+simple_serde_diffable!(SimpleWrapper);
 
 #[derive(SerdeDiffable, Clone, PartialEq, Serialize, Deserialize, Debug)]
 struct MyInnerStruct {
@@ -15,6 +19,7 @@ struct MyStruct {
     b: i32,
     s: String,
     c: MyInnerStruct,
+    simple: SimpleWrapper,
 }
 
 fn main() {
@@ -29,6 +34,7 @@ fn main() {
             string_list: vec!["str1".to_string(), "str3".to_string()],
             string_list2: vec!["str6".to_string(), "str7".to_string()],
         },
+        simple: SimpleWrapper(10),
     };
 
     // Create new state
@@ -42,6 +48,7 @@ fn main() {
             string_list: vec!["str1".to_string(), "str2".to_string(), "str3".to_string()],
             string_list2: vec!["str6".to_string()],
         },
+        simple: SimpleWrapper(10),
     };
     let json_data = serde_json::to_string(&Diff::serializable(&old, &new)).unwrap();
     let bincode_data = bincode::serialize(&Diff::serializable(&old, &new)).unwrap();
@@ -56,6 +63,7 @@ fn main() {
             string_list: vec!["str1".to_string(), "str5".to_string()],
             string_list2: vec!["str6".to_string(), "str7".to_string()],
         },
+        simple: SimpleWrapper(10),
     };
     {
         let mut target = target.clone();

@@ -1,3 +1,6 @@
+use crate as struct_diff;
+#[doc(hidden)]
+pub use serde as _serde;
 use serde::{
     de,
     ser::{self, SerializeSeq},
@@ -639,12 +642,16 @@ impl<T: PartialEq + Serialize + for<'a> Deserialize<'a>> SerdeDiffable for Vec<T
         Ok(())
     }
 }
+/// Implements SerdeDiffable on a type given that it impls Serialize + Deserialize + PartialEq.
+/// This makes the type a "terminal" type in the SerdeDiffable hierarchy, meaning deeper inspection
+/// will not be possible. Use the SerdeDiffable derive macro for
+#[macro_export]
 macro_rules! simple_serde_diffable {
     ($t:ty) => {
         impl SerdeDiffable for $t {
-            fn diff<'a, S: SerializeSeq>(
+            fn diff<'a, S: struct_diff::_serde::ser::SerializeSeq>(
                 &self,
-                ctx: &mut DiffContext<'a, S>,
+                ctx: &mut struct_diff::DiffContext<'a, S>,
                 other: &Self,
             ) -> Result<(), S::Error> {
                 if self != other {
@@ -657,10 +664,10 @@ macro_rules! simple_serde_diffable {
             fn apply<'de, A>(
                 &mut self,
                 seq: &mut A,
-                ctx: &mut ApplyContext,
-            ) -> Result<(), <A as de::SeqAccess<'de>>::Error>
+                ctx: &mut struct_diff::ApplyContext,
+            ) -> Result<(), <A as struct_diff::_serde::de::SeqAccess<'de>>::Error>
             where
-                A: de::SeqAccess<'de>,
+                A: struct_diff::_serde::de::SeqAccess<'de>,
             {
                 ctx.read_value(seq, self)?;
                 Ok(())

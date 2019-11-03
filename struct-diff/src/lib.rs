@@ -605,7 +605,6 @@ impl<T: PartialEq + Serialize + for<'a> Deserialize<'a>> SerdeDiffable for Vec<T
         while let Some(cmd) = ctx.read_next_command::<A, T>(seq)? {
             use DiffCommandValue::*;
             use DiffPathElementValue::*;
-            println!("got cmd {:?}", cmd);
             match cmd {
                 // we should not be getting fields when reading collection commands
                 Enter(Field(_)) => {
@@ -631,12 +630,6 @@ impl<T: PartialEq + Serialize + for<'a> Deserialize<'a>> SerdeDiffable for Vec<T
                 }
                 Remove(num_elements) => {
                     let new_length = self.len().saturating_sub(num_elements);
-                    println!(
-                        "removing {} old length {} new length {}",
-                        num_elements,
-                        self.len(),
-                        new_length,
-                    );
                     self.truncate(new_length);
                     break;
                 }

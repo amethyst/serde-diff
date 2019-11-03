@@ -554,6 +554,7 @@ impl<T: PartialEq + Serialize + for<'a> Deserialize<'a>> SerdeDiffable for Vec<T
         let mut self_iter = self.iter();
         let mut other_iter = other.iter();
         let mut idx = 0;
+        let mut need_exit = false;
         loop {
             let self_item = self_iter.next();
             let other_item = other_iter.next();
@@ -567,6 +568,7 @@ impl<T: PartialEq + Serialize + for<'a> Deserialize<'a>> SerdeDiffable for Vec<T
                     ctx.save_command::<()>(&DiffCommandRef::Remove(num_to_remove), true)?;
                 }
                 (None, Some(other_item)) => {
+                    need_exit = true;
                     ctx.save_command::<()>(
                         &DiffCommandRef::Enter(DiffPathElementValue::AddToCollection),
                         false,
@@ -575,6 +577,7 @@ impl<T: PartialEq + Serialize + for<'a> Deserialize<'a>> SerdeDiffable for Vec<T
                 }
                 (Some(self_item), Some(other_item)) => {
                     if self_item != other_item {
+                        need_exit = true;
                         ctx.save_command::<()>(
                             &DiffCommandRef::Enter(DiffPathElementValue::CollectionIndex(idx)),
                             false,
@@ -584,6 +587,9 @@ impl<T: PartialEq + Serialize + for<'a> Deserialize<'a>> SerdeDiffable for Vec<T
                 }
             }
             idx += 1;
+        }
+        if need_exit {
+            ctx.save_command::<()>(&DiffCommandRef::Exit, true)?;
         }
         Ok(())
     }
@@ -599,6 +605,7 @@ impl<T: PartialEq + Serialize + for<'a> Deserialize<'a>> SerdeDiffable for Vec<T
         while let Some(cmd) = ctx.read_next_command::<A, T>(seq)? {
             use DiffCommandValue::*;
             use DiffPathElementValue::*;
+            println!("got cmd {:?}", cmd);
             match cmd {
                 // we should not be getting fields when reading collection commands
                 Enter(Field(_)) => {
@@ -624,6 +631,12 @@ impl<T: PartialEq + Serialize + for<'a> Deserialize<'a>> SerdeDiffable for Vec<T
                 }
                 Remove(num_elements) => {
                     let new_length = self.len().saturating_sub(num_elements);
+                    println!(
+                        "removing {} old length {} new length {}",
+                        num_elements,
+                        self.len(),
+                        new_length,
+                    );
                     self.truncate(new_length);
                     break;
                 }

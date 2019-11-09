@@ -46,7 +46,7 @@ serde_json
 `Cargo.toml`
 ```
 [dependencies]
-serde-diff = "0.1.0"
+serde-diff = "0.1.1"
 serde = "1"
 serde_json = "1" // all serde formats are supported, serde_json is shown in this example
 ```

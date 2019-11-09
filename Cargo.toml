@@ -1,6 +1,6 @@
 [package]
 name = "serde-diff"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Karl Bergström <karl.anton.bergstrom@gmail.com>", "Philip Degarmo <aclysma@gmail.com>"]
 readme = "README.md"
 exclude = ["examples/*"]
@@ -16,7 +16,7 @@ maintenance = { status = "experimental" }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-serde-diff-derive = { version = "0.1.1", path = "serde-diff-derive" }
+serde-diff-derive = { version = "0.1.2", path = "serde-diff-derive" }
 serde =  { version = "1", features = [ "derive" ] }
 serde_derive = { version = "1", features = ["deserialize_in_place"]}
 

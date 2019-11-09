@@ -21,21 +21,21 @@ Works for most basic use-cases. Includes derive macro, some standard library typ
 
 ## Usage
 On a struct:
-```
+```rust
 #[derive(SerdeDiff, Serialize, Deserialize)]
 ```
 
 Serialize & apply differences:
 
 bincode
-```
+```rust
 let bincode_data = bincode::serialize(&Diff::serializable(&old, &new)).unwrap();
 bincode::config()
         .deserialize_seed(Apply::deserializable(&mut target), &bincode_data)
         .unwrap();
 ```
 serde_json
-```
+```rust
         let json_data = serde_json::to_string(&Diff::serializable(&old, &new)).unwrap();
         let mut deserializer = serde_json::Deserializer::from_str(&json_data);
         Apply::apply(&mut deserializer, &mut target).unwrap();
@@ -44,14 +44,14 @@ serde_json
 # Simple example
 
 `Cargo.toml`
-```
+```toml
 [dependencies]
 serde-diff = "0.1.1"
 serde = "1"
 serde_json = "1" // all serde formats are supported, serde_json is shown in this example
 ```
 `main.rs`
-```
+```rust
 use serde_diff::{Apply, Diff, SerdeDiff};
 use serde::{Serialize, Deserialize};
 #[derive(SerdeDiff, Serialize, Deserialize, Debug)]

@@ -2,7 +2,9 @@
 
 A small helper to diff structs of the same type and apply those differences to other structs
 
-TODO: Build Status and crates.io badges
+[![Build Status](https://travis-ci.org/aclysma/struct-diff.svg?branch=master)](https://travis-ci.org/aclysma/struct-diff)
+
+TODO: crates.io badge
 
 ## Status
 

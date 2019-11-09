@@ -8,7 +8,7 @@ license = "Apache-2.0+MIT"
 edition = "2018"
 description = "A small helper to serialize the diff of two structs of the same type and apply those differences to other structs."
 
-repository = "https://github.com/aclysma/struct-diff"
+repository = "https://github.com/amethyst/serde-diff"
 
 [badges]
 maintenance = { status = "experimental" }
@@ -16,7 +16,7 @@ maintenance = { status = "experimental" }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-serde-diff-derive = { path = "struct-diff-derive" }
+serde-diff-derive = { path = "serde-diff-derive" }
 serde =  { version = "1", features = [ "derive" ] }
 serde_derive = { version = "1", features = ["deserialize_in_place"]}
 

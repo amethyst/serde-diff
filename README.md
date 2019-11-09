@@ -1,4 +1,4 @@
-# struct-diff
+# serde-diff
 
 A small helper that can
 1. Serialize the fields that differ between two structs of the same type 
@@ -6,7 +6,7 @@ A small helper that can
 
 The SerdeDiffable can serialize field paths recursively, greatly reducing the amount of data that needs to be serialized.
 
-[![Build Status](https://travis-ci.org/aclysma/struct-diff.svg?branch=master)](https://travis-ci.org/aclysma/struct-diff)
+[![Build Status](https://travis-ci.org/amethyst/serde-diff.svg?branch=master)](https://travis-ci.org/amethyst/serde-diff)
 
 TODO: crates.io badge
 

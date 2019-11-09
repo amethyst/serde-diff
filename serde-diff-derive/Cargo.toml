@@ -3,7 +3,7 @@ name = "serde-diff-derive"
 version = "0.1.0"
 authors = ["Karl Bergström <karl.anton.bergstrom@gmail.com", "Philip Degarmo <aclysma@gmail.com>"]
 readme = "README.md"
-license = "Apache-2.0+MIT"
+license = "Apache-2.0 OR MIT"
 edition = "2018"
 description = "Derives serde_diff::SerdeDiff"
 

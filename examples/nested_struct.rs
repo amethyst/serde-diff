@@ -70,7 +70,7 @@ fn main() {
     let diff = Diff::serializable(&old, &new);
 
     // Serialize into a couple different formats
-    let json_data = serde_json::to_string_pretty(&diff).unwrap();
+    let json_data = serde_json::to_string(&diff).unwrap();
     let bincode_data = bincode::serialize(&diff).unwrap();
 
     // Create a struct to which we will apply a diff. This is a mix of old and new state from

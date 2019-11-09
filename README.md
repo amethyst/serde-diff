@@ -4,7 +4,7 @@ A small helper that can
 1. Serialize the fields that differ between two structs of the same type 
 2. Apply previously serialized field differences to other structs.
 
-The SerdeDiff trait impl can serialize field paths recursively, greatly reducing the amount of data that needs to be serialized.
+The SerdeDiff trait impl can serialize field paths recursively, greatly reducing the amount of data that needs to be serialized when only a small part of a struct has changed. 
 
 [![Build Status][build_img]][build_lnk] [![Crates.io][crates_img]][crates_lnk] [![Docs.rs][doc_img]][doc_lnk]
 

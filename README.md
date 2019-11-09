@@ -4,7 +4,7 @@ A small helper that can
 1. Serialize the fields that differ between two structs of the same type 
 2. Apply previously serialized field differences to other structs.
 
-The SerdeDiffable can serialize field paths recursively, greatly reducing the amount of data that needs to be serialized.
+The SerdeDiff trait impl can serialize field paths recursively, greatly reducing the amount of data that needs to be serialized.
 
 [![Build Status](https://travis-ci.org/amethyst/serde-diff.svg?branch=master)](https://travis-ci.org/amethyst/serde-diff)
 
@@ -17,7 +17,7 @@ Works for most basic use-cases. Includes derive macro, some standard library typ
 ## Usage
 On a struct:
 ```
-#[derive(SerdeDiffable, Serialize, Deserialize)]
+#[derive(SerdeDiff, Serialize, Deserialize)]
 ```
 
 Serialize & apply differences:

@@ -54,7 +54,7 @@ serde_json = "1" // all serde formats are supported, serde_json is shown in this
 ```rust
 use serde_diff::{Apply, Diff, SerdeDiff};
 use serde::{Serialize, Deserialize};
-#[derive(SerdeDiff, Serialize, Deserialize, Debug)]
+#[derive(SerdeDiff, Serialize, Deserialize, PartialEq, Debug)]
 struct TestStruct {
     a: u32,
     b: f64,
@@ -66,18 +66,23 @@ fn main() {
         b: 2.,
     };
     let new = TestStruct {
-        a: 8,
+        a: 8, // Differs from old.a, will be serialized
         b: 2.,
     };
     let mut target = TestStruct {
         a: 0,
-        b: 2.,
+        b: 4.,
     };
     let json_data = serde_json::to_string(&Diff::serializable(&old, &new)).unwrap();
     let mut deserializer = serde_json::Deserializer::from_str(&json_data);
     Apply::apply(&mut deserializer, &mut target).unwrap();
 
-    println!("Result: {:?}", target);
+
+    let result = TestStruct {
+        a: 8,
+        b: 4.,
+    };
+    assert_eq!(result, target);
 }
 ```
 

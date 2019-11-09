@@ -675,7 +675,7 @@ impl<T: SerdeDiff + Serialize + for<'a> Deserialize<'a>> SerdeDiff for Vec<T> {
 }
 /// Implements SerdeDiff on a type given that it impls Serialize + Deserialize + PartialEq.
 /// This makes the type a "terminal" type in the SerdeDiff hierarchy, meaning deeper inspection
-/// will not be possible. Use the SerdeDiff derive macro for
+/// will not be possible. Use the SerdeDiff derive macro for recursive field inspection.
 #[macro_export]
 macro_rules! simple_serde_diff {
     ($t:ty) => {

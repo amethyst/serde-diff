@@ -6,9 +6,14 @@ A small helper that can
 
 The SerdeDiff trait impl can serialize field paths recursively, greatly reducing the amount of data that needs to be serialized.
 
-[![Build Status](https://travis-ci.org/amethyst/serde-diff.svg?branch=master)](https://travis-ci.org/amethyst/serde-diff)
+[![Build Status][build_img]][build_lnk] [![Crates.io][crates_img]][crates_lnk] [![Docs.rs][doc_img]][doc_lnk]
 
-TODO: crates.io badge
+[build_img]: https://travis-ci.org/amethyst/serde-diff.svg
+[build_lnk]: https://travis-ci.org/amethyst/serde-diff
+[crates_img]: https://img.shields.io/crates/v/serde-diff.svg
+[crates_lnk]: https://crates.io/crates/serde-diff
+[doc_img]: https://docs.rs/serde-diff/badge.svg
+[doc_lnk]: https://docs.rs/serde-diff
 
 ## Status
 
@@ -31,8 +36,49 @@ bincode::config()
 ```
 serde_json
 ```
+        let json_data = serde_json::to_string(&Diff::serializable(&old, &new)).unwrap();
         let mut deserializer = serde_json::Deserializer::from_str(&json_data);
         Apply::apply(&mut deserializer, &mut target).unwrap();
+```
+
+# Simple example
+
+`Cargo.toml`
+```
+[dependencies]
+serde-diff = "0.1.0"
+serde = "1"
+serde_json = "1" // all serde formats are supported, serde_json is shown in this example
+```
+`main.rs`
+```
+use serde_diff::{Apply, Diff, SerdeDiff};
+use serde::{Serialize, Deserialize};
+#[derive(SerdeDiff, Serialize, Deserialize, Debug)]
+struct TestStruct {
+    a: u32,
+    b: f64,
+}
+
+fn main() {
+    let old = TestStruct {
+        a: 5,
+        b: 2.,
+    };
+    let new = TestStruct {
+        a: 8,
+        b: 2.,
+    };
+    let mut target = TestStruct {
+        a: 0,
+        b: 2.,
+    };
+    let json_data = serde_json::to_string(&Diff::serializable(&old, &new)).unwrap();
+    let mut deserializer = serde_json::Deserializer::from_str(&json_data);
+    Apply::apply(&mut deserializer, &mut target).unwrap();
+
+    println!("Result: {:?}", target);
+}
 ```
 
 ## Contribution

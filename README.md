@@ -1,6 +1,10 @@
 # struct-diff
 
-A small helper to diff structs of the same type and apply those differences to other structs
+A small helper that can
+1. Serialize the fields that differ between two structs of the same type 
+2. Apply previously serialized field differences to other structs.
+
+The SerdeDiffable can serialize field paths recursively, greatly reducing the amount of data that needs to be serialized.
 
 [![Build Status](https://travis-ci.org/aclysma/struct-diff.svg?branch=master)](https://travis-ci.org/aclysma/struct-diff)
 
@@ -8,9 +12,16 @@ TODO: crates.io badge
 
 ## Status
 
-Works for most basic use-cases. Includes derive macro, some standard library type implementations and deep serde integration. Supports both text and binary serde formats.
+Works for most basic use-cases. Includes derive macro, some standard library type implementations and deep serde integration. Supports diffing Vec<T>. Supports both text and binary serde formats.
 
 ## Usage
+On a struct:
+```
+#[derive(SerdeDiffable, Serialize, Deserialize)]
+```
+
+Serialize & apply differences:
+
 bincode
 ```
 let bincode_data = bincode::serialize(&Diff::serializable(&old, &new)).unwrap();
@@ -23,7 +34,6 @@ serde_json
         let mut deserializer = serde_json::Deserializer::from_str(&json_data);
         Apply::apply(&mut deserializer, &mut target).unwrap();
 ```
-
 
 ## Contribution
 

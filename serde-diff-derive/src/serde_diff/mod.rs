@@ -82,15 +82,28 @@ fn generate(
         let ident_as_str = quote!(#ident).to_string();
         let ty = pf.field_args.ty();
 
-        diff_fn_field_handlers.push(quote! {
-            {
+        if pf.field_args.inline() {
+            diff_fn_field_handlers.push(quote! {
                 {
                     ctx.push_field(#ident_as_str);
-                    __changed__ |= <#ty as serde_diff::SerdeDiff>::diff(&self.#ident, ctx, &other.#ident)?;
+                    if self.#ident != other.#ident {
+                        ctx.save_value(&other.#ident)?;
+                        __changed__ |= true;
+                    }
                     ctx.pop_path_element()?;
                 }
-            }
-        });
+            });
+        } else {
+            diff_fn_field_handlers.push(quote! {
+                {
+                    {
+                        ctx.push_field(#ident_as_str);
+                        __changed__ |= <#ty as serde_diff::SerdeDiff>::diff(&self.#ident, ctx, &other.#ident)?;
+                        ctx.pop_path_element()?;
+                    }
+                }
+            });
+        }
     }
 
     // Generate the SerdeDiff::diff function for the type
@@ -114,9 +127,15 @@ fn generate(
         let ident_as_str = quote!(#ident).to_string();
         let ty = pf.field_args.ty();
 
-        apply_fn_field_handlers.push(quote!(
-            #ident_as_str => __changed__ |= <#ty as serde_diff::SerdeDiff>::apply(&mut self.#ident, seq, ctx)?,
-        ));
+        if pf.field_args.inline() {
+            apply_fn_field_handlers.push(quote!(
+                #ident_as_str => __changed__ |= ctx.read_value(seq, &mut self.#ident)?,
+            ));
+        } else {
+            apply_fn_field_handlers.push(quote!(
+                #ident_as_str => __changed__ |= <#ty as serde_diff::SerdeDiff>::apply(&mut self.#ident, seq, ctx)?,
+            ));
+        }
     }
 
     // Generate the SerdeDiff::apply function for the type

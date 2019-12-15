@@ -1,4 +1,4 @@
-use darling::{FromField, FromDeriveInput};
+use darling::{FromDeriveInput, FromField};
 
 /// Metadata from the struct's type annotation
 #[derive(Debug, FromDeriveInput)]
@@ -21,21 +21,30 @@ pub struct SerdeDiffFieldArgs {
     /// If true, this field should be ignored
     #[darling(default)]
     skip: bool,
+
+    /// If true, simple diff should be generated inline
+    #[darling(default)]
+    inline: bool,
 }
 
 impl SerdeDiffFieldArgs {
     /// Name of the field
     pub fn ident(&self) -> &Option<syn::Ident> {
-        return &self.ident
+        return &self.ident;
     }
 
     /// Type of the field
     pub fn ty(&self) -> &syn::Type {
-       return &self.ty
-   }
+        return &self.ty;
+    }
+
+    /// If true, simple diff should be generated inline
+    pub fn skip(&self) -> bool {
+        return self.skip;
+    }
 
     /// If true, this field should be ignored
-    pub fn skip(&self) -> bool {
-        return self.skip
+    pub fn inline(&self) -> bool {
+        return self.inline;
     }
 }

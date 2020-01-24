@@ -815,29 +815,102 @@ simple_serde_diff!(std::net::SocketAddrV4);
 simple_serde_diff!(std::net::SocketAddrV6);
 simple_serde_diff!(std::path::PathBuf);
 
-impl<T: PartialEq + Serialize + for<'a> Deserialize<'a>> SerdeDiff for Option<T> {
-    fn diff<'a, S: serde_diff::_serde::ser::SerializeSeq>(
+impl<T: SerdeDiff + Serialize + for<'a> Deserialize<'a>> SerdeDiff for Option<T> {
+    fn diff<'a, S: SerializeSeq>(
         &self,
-        ctx: &mut serde_diff::DiffContext<'a, S>,
+        ctx: &mut DiffContext<'a, S>,
         other: &Self,
     ) -> Result<bool, S::Error> {
-        if self != other {
-            ctx.save_value(other)?;
-            Ok(true)
-        } else {
-            Ok(false)
+        let mut self_iter = self.iter();
+        let mut other_iter = other.iter();
+        let mut idx = 0;
+        let mut need_exit = false;
+        let mut changed = false;
+        loop {
+            let self_item = self_iter.next();
+            let other_item = other_iter.next();
+            match (self_item, other_item) {
+                (None, None) => break,
+                (Some(_), None) => {
+                    let mut num_to_remove = 1;
+                    while self_iter.next().is_some() {
+                        num_to_remove += 1;
+                    }
+                    ctx.save_command::<()>(&DiffCommandRef::Remove(num_to_remove), true)?;
+                    changed = true;
+                }
+                (None, Some(other_item)) => {
+                    ctx.save_command::<()>(
+                        &DiffCommandRef::Enter(DiffPathElementValue::AddToCollection),
+                        false,
+                    )?;
+                    ctx.save_command(&DiffCommandRef::Value(other_item), true)?;
+                    need_exit = true;
+                    changed = true;
+                }
+                (Some(self_item), Some(other_item)) => {
+                    ctx.push_collection_index(idx);
+                    if <T as SerdeDiff>::diff(self_item, ctx, other_item)? {
+                        need_exit = true;
+                        changed = true;
+                    }
+                    ctx.pop_path_element()?;
+                }
+            }
+            idx += 1;
         }
+        if need_exit {
+            ctx.save_command::<()>(&DiffCommandRef::Exit, true)?;
+        }
+        Ok(changed)
     }
 
     fn apply<'de, A>(
         &mut self,
         seq: &mut A,
-        ctx: &mut serde_diff::ApplyContext,
-    ) -> Result<bool, <A as serde_diff::_serde::de::SeqAccess<'de>>::Error>
+        ctx: &mut ApplyContext,
+    ) -> Result<bool, <A as de::SeqAccess<'de>>::Error>
     where
-        A: serde_diff::_serde::de::SeqAccess<'de>,
+        A: de::SeqAccess<'de>,
     {
-        ctx.read_value(seq, self)
+        let mut changed = false;
+        while let Some(cmd) = ctx.read_next_command::<A, T>(seq)? {
+            use DiffCommandValue::*;
+            use DiffPathElementValue::*;
+            match cmd {
+                // we should not be getting fields when reading collection commands
+                Enter(Field(_)) => {
+                    ctx.skip_value(seq)?;
+                    break;
+                }
+                Enter(CollectionIndex(0)) => {
+                    if let Some(value_ref) = self {
+                        changed |= <T as SerdeDiff>::apply(value_ref, seq, ctx)?;
+                    } else {
+                        ctx.skip_value(seq)?;
+                    }
+                }
+                Enter(AddToCollection) => {
+                    if let Value(v) = ctx
+                        .read_next_command(seq)?
+                        .expect("Expected value after AddToCollection")
+                    {
+                        debug_assert!(self.is_none());
+                        changed = true;
+                        *self = Some(v);
+                    } else {
+                        panic!("Expected value after AddToCollection");
+                    }
+                }
+                Remove(1) => {
+                    *self = None;
+                    changed = true;
+                    break;
+                }
+                _ => break,
+            }
+        }
+        Ok(changed)
     }
 }
 

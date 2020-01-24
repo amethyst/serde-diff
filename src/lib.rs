@@ -726,6 +726,7 @@ simple_serde_diff!(f64);
 simple_serde_diff!(char);
 simple_serde_diff!(String);
 simple_serde_diff!(std::ffi::CString);
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 simple_serde_diff!(std::ffi::OsString);
 simple_serde_diff!(std::num::NonZeroU8);
 simple_serde_diff!(std::num::NonZeroU16);

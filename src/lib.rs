@@ -575,6 +575,7 @@ pub enum DiffPathElementValue<'a> {
     CollectionIndex(usize),
     AddToCollection,
 }
+
 impl<T: SerdeDiff + Serialize + for<'a> Deserialize<'a>> SerdeDiff for Vec<T> {
     fn diff<'a, S: SerializeSeq>(
         &self,
@@ -673,6 +674,78 @@ impl<T: SerdeDiff + Serialize + for<'a> Deserialize<'a>> SerdeDiff for Vec<T> {
         Ok(changed)
     }
 }
+
+macro_rules! serde_diff_array {
+    ($($len:tt)+) => {
+        $(
+            impl<T: $crate::SerdeDiff + serde::Serialize + for<'a> serde::Deserialize<'a>> $crate::SerdeDiff for [T; $len] {
+                fn diff<'a, S: serde::ser::SerializeSeq>(
+                    &self,
+                    ctx: &mut $crate::DiffContext<'a, S>,
+                    other: &Self,
+                ) -> Result<bool, S::Error> {
+                    use $crate::DiffCommandRef;
+
+                    let mut need_exit = false;
+                    let mut changed = false;
+                    for (idx, (self_item, other_item)) in self.iter().zip(other.iter()).enumerate() {
+                        ctx.push_collection_index(idx);
+                        if <T as $crate::SerdeDiff>::diff(self_item, ctx, other_item)? {
+                            need_exit = true;
+                            changed = true;
+                        }
+                        ctx.pop_path_element()?;
+                    }
+                    if need_exit {
+                        ctx.save_command::<()>(&DiffCommandRef::Exit, true)?;
+                    }
+                    Ok(changed)
+                }
+
+                fn apply<'de, A>(
+                    &mut self,
+                    seq: &mut A,
+                    ctx: &mut $crate::ApplyContext,
+                ) -> Result<bool, <A as serde::de::SeqAccess<'de>>::Error>
+                where
+                    A: serde::de::SeqAccess<'de>,
+                {
+                    let mut changed = false;
+                    while let Some(cmd) = ctx.read_next_command::<A, T>(seq)? {
+                        use $crate::DiffCommandValue::*;
+                        use $crate::DiffPathElementValue::*;
+                        match cmd {
+                            // we should not be getting fields when reading collection commands
+                            Enter(Field(_)) => {
+                                ctx.skip_value(seq)?;
+                                break;
+                            }
+                            Enter(CollectionIndex(idx)) => {
+                                if let Some(value_ref) = self.get_mut(idx) {
+                                    changed |= <T as $crate::SerdeDiff>::apply(value_ref, seq, ctx)?;
+                                } else {
+                                    ctx.skip_value(seq)?;
+                                }
+                            }
+                            _ => break,
+                        }
+                    }
+                    Ok(changed)
+                }
+            }
+        )+
+    }
+}
+
+serde_diff_array! {
+    01 02 03 04 05 06 07 08 09 10
+    11 12 13 14 15 16 17 18 19 20
+    21 22 23 24 25 26 27 28 29 30
+    31 32
+    40 48 50 56 64 72 96 100 128 160 192 200 224 256 384 512
+    768 1024 2048 4096 8192 16384 32768 65536
+}
+
 /// Implements SerdeDiff on a type given that it impls Serialize + Deserialize + PartialEq.
 /// This makes the type a "terminal" type in the SerdeDiff hierarchy, meaning deeper inspection
 /// will not be possible. Use the SerdeDiff derive macro for recursive field inspection.
@@ -741,6 +814,32 @@ simple_serde_diff!(std::net::SocketAddr);
 simple_serde_diff!(std::net::SocketAddrV4);
 simple_serde_diff!(std::net::SocketAddrV6);
 simple_serde_diff!(std::path::PathBuf);
+
+impl<T: PartialEq + Serialize + for<'a> Deserialize<'a>> SerdeDiff for Option<T> {
+    fn diff<'a, S: serde_diff::_serde::ser::SerializeSeq>(
+        &self,
+        ctx: &mut serde_diff::DiffContext<'a, S>,
+        other: &Self,
+    ) -> Result<bool, S::Error> {
+        if self != other {
+            ctx.save_value(other)?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    fn apply<'de, A>(
+        &mut self,
+        seq: &mut A,
+        ctx: &mut serde_diff::ApplyContext,
+    ) -> Result<bool, <A as serde_diff::_serde::de::SeqAccess<'de>>::Error>
+    where
+        A: serde_diff::_serde::de::SeqAccess<'de>,
+    {
+        ctx.read_value(seq, self)
+    }
+}
 
 #[allow(dead_code)]
 type Unit = ();

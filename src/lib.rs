@@ -678,7 +678,7 @@ impl<T: SerdeDiff + Serialize + for<'a> Deserialize<'a>> SerdeDiff for Vec<T> {
     }
 }
 
-macro_rules! serde_diff_array {
+macro_rules! array_impls {
     ($($len:tt)+) => {
         $(
             impl<T: $crate::SerdeDiff + serde::Serialize + for<'a> serde::Deserialize<'a>> $crate::SerdeDiff for [T; $len] {
@@ -740,13 +740,77 @@ macro_rules! serde_diff_array {
     }
 }
 
-serde_diff_array! {
+array_impls! {
     01 02 03 04 05 06 07 08 09 10
     11 12 13 14 15 16 17 18 19 20
     21 22 23 24 25 26 27 28 29 30
     31 32
     40 48 50 56 64 72 96 100 128 160 192 200 224 256 384 512
     768 1024 2048 4096 8192 16384 32768 65536
+}
+
+macro_rules! tuple_impls {
+    ($($len:expr => ($($n:tt $name:ident)+))+) => {
+        $(
+            impl<$($name),+> $crate::SerdeDiff for ($($name,)+)
+            where
+                $($name: $crate::SerdeDiff + serde::Serialize + for<'a> serde::Deserialize<'a>,)+
+            {
+                fn diff<'a, S: serde::ser::SerializeSeq>(
+                    &self,
+                    ctx: &mut $crate::DiffContext<'a, S>,
+                    other: &Self,
+                ) -> Result<bool, S::Error> {
+                    let mut changed = false;
+                    $(
+                        ctx.push_field(stringify!($name));
+                        changed |= <$name as serde_diff::SerdeDiff>::diff(&self.$n, ctx, &other.$n)?;
+                        ctx.pop_path_element()?;
+                    )+
+                    Ok(changed)
+                }
+
+                fn apply<'de, A>(
+                    &mut self,
+                    seq: &mut A,
+                    ctx: &mut $crate::ApplyContext,
+                ) -> Result<bool, <A as serde::de::SeqAccess<'de>>::Error>
+                where
+                    A: serde::de::SeqAccess<'de>,
+                {
+                    let mut changed = false;
+                    while let Some(serde_diff::DiffPathElementValue::Field(element)) = ctx.next_path_element(seq)? {
+                        match element.as_ref() {
+                            $(
+                                stringify!($name) => changed |= <$name as serde_diff::SerdeDiff>::apply(&mut self.$n, seq, ctx)?,
+                            )+
+                            _ => ctx.skip_value(seq)?,
+                        }
+                    }
+                    Ok(changed)
+                }
+            }
+        )+
+    }
+}
+
+tuple_impls! {
+    1 => (0 T0)
+    2 => (0 T0 1 T1)
+    3 => (0 T0 1 T1 2 T2)
+    4 => (0 T0 1 T1 2 T2 3 T3)
+    5 => (0 T0 1 T1 2 T2 3 T3 4 T4)
+    6 => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5)
+    7 => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6)
+    8 => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7)
+    9 => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7 8 T8)
+    10 => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7 8 T8 9 T9)
+    11 => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7 8 T8 9 T9 10 T10)
+    12 => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7 8 T8 9 T9 10 T10 11 T11)
+    13 => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7 8 T8 9 T9 10 T10 11 T11 12 T12)
+    14 => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7 8 T8 9 T9 10 T10 11 T11 12 T12 13 T13)
+    15 => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7 8 T8 9 T9 10 T10 11 T11 12 T12 13 T13 14 T14)
+    16 => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7 8 T8 9 T9 10 T10 11 T11 12 T12 13 T13 14 T14 15 T15)
 }
 
 /// Implements SerdeDiff on a type given that it impls Serialize + Deserialize + PartialEq.

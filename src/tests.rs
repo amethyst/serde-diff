@@ -95,3 +95,39 @@ fn test_array() {
         ],
     );
 }
+
+#[test]
+fn test_tuple() {
+    roundtrip(
+        (None::<TestStruct>, Some(TestStruct { a: 8, b: 2. })),
+        (None, Some(TestStruct { a: 8, b: 2. })),
+    );
+
+    partial((0, 1, 2, 3), (0, 1, 9, 3), (4, 5, 6, 7), (4, 5, 9, 7));
+
+    partial(
+        Some((0, 1, 2, 3)),
+        Some((0, 1, 9, 3)),
+        Some((4, 5, 6, 7)),
+        Some((4, 5, 9, 7)),
+    );
+
+    partial(
+        (
+            None,
+            Some(TestStruct { a: 5, b: 2. }),
+            Some(TestStruct { a: 5, b: 2. }),
+        ),
+        (
+            Some(TestStruct { a: 8, b: 2. }),
+            Some(TestStruct { a: 8, b: 2. }),
+            None,
+        ),
+        (None, Some(TestStruct { a: 0, b: 4. }), None),
+        (
+            Some(TestStruct { a: 8, b: 2. }),
+            Some(TestStruct { a: 8, b: 4. }),
+            None,
+        ),
+    );
+}

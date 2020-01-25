@@ -76,7 +76,7 @@ fn generate(
 
     // This will hold a bit of code per-field that call diff on that field
     let mut diff_fn_field_handlers = vec![];
-    for pf in &parsed_fields {
+    for (field_idx, pf) in parsed_fields.iter().enumerate() {
         // Skip fields marked as #[serde_diff(skip)]
         if pf.field_args.skip() {
             continue;
@@ -85,6 +85,7 @@ fn generate(
         let ident = pf.field_args.ident().clone();
         let ident_as_str = quote!(#ident).to_string();
         let ty = pf.field_args.ty();
+        let field_idx = field_idx as u16;
 
         if pf.field_args.opaque() {
             diff_fn_field_handlers.push(quote! {
@@ -101,7 +102,10 @@ fn generate(
             diff_fn_field_handlers.push(quote! {
                 {
                     {
-                        ctx.push_field(#ident_as_str);
+                        match ctx.field_path_mode() {
+                            serde_diff::FieldPathMode::Name => ctx.push_field(#ident_as_str),
+                            serde_diff::FieldPathMode::Index => ctx.push_field_index(#field_idx),
+                        }
                         __changed__ |= <#ty as serde_diff::SerdeDiff>::diff(&self.#ident, ctx, &other.#ident)?;
                         ctx.pop_path_element()?;
                     }
@@ -121,7 +125,7 @@ fn generate(
 
     // This will hold a bit of code per-field that call apply on that field
     let mut apply_fn_field_handlers = vec![];
-    for pf in &parsed_fields {
+    for (field_idx, pf) in parsed_fields.iter().enumerate() {
         // Skip fields marked as #[serde_diff(skip)]
         if pf.field_args.skip() {
             continue;
@@ -130,14 +134,17 @@ fn generate(
         let ident = pf.field_args.ident().clone();
         let ident_as_str = quote!(#ident).to_string();
         let ty = pf.field_args.ty();
+        let field_idx = field_idx as u16;
 
         if pf.field_args.opaque() {
             apply_fn_field_handlers.push(quote!(
-                #ident_as_str => __changed__ |= ctx.read_value(seq, &mut self.#ident)?,
+                serde_diff::DiffPathElementValue::FieldIndex(#field_idx) => __changed__ |= ctx.read_value(seq, &mut self.#ident)?,
+                serde_diff::DiffPathElementValue::Field(field_path) if field_path.as_ref() == #ident_as_str => __changed__ |= ctx.read_value(seq, &mut self.#ident)?,
             ));
         } else {
             apply_fn_field_handlers.push(quote!(
-                #ident_as_str => __changed__ |= <#ty as serde_diff::SerdeDiff>::apply(&mut self.#ident, seq, ctx)?,
+                serde_diff::DiffPathElementValue::FieldIndex(#field_idx) => __changed__ |= <#ty as serde_diff::SerdeDiff>::apply(&mut self.#ident, seq, ctx)?,
+                serde_diff::DiffPathElementValue::Field(field_path) if field_path.as_ref() == #ident_as_str => __changed__ |= <#ty as serde_diff::SerdeDiff>::apply(&mut self.#ident, seq, ctx)?,
             ));
         }
     }
@@ -154,8 +161,8 @@ fn generate(
         where
             A: serde_diff::_serde::de::SeqAccess<'de>, {
             let mut __changed__ = false;
-            while let Some(serde_diff::DiffPathElementValue::Field(element)) = ctx.next_path_element(seq)? {
-                match element.as_ref() {
+            while let Some(element) = ctx.next_path_element(seq)? {
+                match element {
                     #(#apply_fn_field_handlers)*
                     _ => ctx.skip_value(seq)?,
                 }

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_diff::{Apply, Diff, SerdeDiff};
 use std::collections::HashMap;
 
-#[derive(SerdeDiff, Serialize, Deserialize, Debug, Default, PartialEq)]
+#[derive(SerdeDiff, Serialize, Deserialize, Debug, Default, PartialEq, Clone)]
 struct TestStruct {
     test: bool,
     //#[serde_diff(opaque)]
@@ -40,13 +40,15 @@ fn main() {
         serde_json::to_string(&Diff::serializable(&hi_world, &hi_world_and_planet)).unwrap();
     let del_world =
         serde_json::to_string(&Diff::serializable(&hi_world_and_planet, &hi_planet)).unwrap();
+    let no_change = serde_json::to_string(&Diff::serializable(&hi_planet, &hi_planet)).unwrap();
 
     let mut built = TestStruct::default();
     for (diff, after) in &[
         (add_hello, hello_world),
         (hello_to_hi, hi_world),
         (add_planet, hi_world_and_planet),
-        (del_world, hi_planet),
+        (del_world, hi_planet.clone()),
+        (no_change, hi_planet),
     ] {
         println!("{}", diff);
 

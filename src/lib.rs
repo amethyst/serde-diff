@@ -54,39 +54,107 @@ pub trait SerdeDiff {
         A: de::SeqAccess<'de>;
 }
 
+#[derive(Copy, Clone)]
+pub enum FieldPathMode {
+    Name,
+    Index,
+}
+enum ElementStackEntry<'a, S: SerializeSeq> {
+    PathElement(DiffPathElementValue<'a>),
+    Closure(&'a dyn Fn(&mut S) -> Result<(), S::Error>),
+}
 /// Used during a diff operation for transient data used during the diff
 #[doc(hidden)]
 pub struct DiffContext<'a, S: SerializeSeq> {
     /// As we descend into fields recursively, the field names (or other "placement" indicators like
     /// array indexes) are pushed and popped to/from this stack
-    field_stack: Vec<DiffPathElementValue<'a>>,
+    element_stack: Option<Vec<ElementStackEntry<'a, S>>>,
     /// Reference to the serializer used to save the data
     serializer: &'a mut S,
     /// some commands are implicit Exit to save space, so we set a flag to avoid writing the next Exit
     implicit_exit_written: bool,
+    /// When pushing field path elements, sometimes we need to narrow the lifetime.
+    /// parent_element_stack contains a reference to the parent DiffContext's element_stack.
+    parent_element_stack: Option<&'a mut Option<Vec<ElementStackEntry<'a, S>>>>,
+    /// Contains the minimum index in the element stack at which this context has pushed elements.
+    /// When the context is dropped, we have to make sure we have dropped all elements
+    /// >= index before we can pass the element stack back to the parent.
+    /// This is to ensure the safety invariant that a sub-context's (a `reborrow`ed context)
+    /// pushed elements cannot live longer than the sub-context itself.
+    element_stack_start: usize,
+    /// Mode for serializing field paths
+    field_path_mode: FieldPathMode,
+}
+
+impl<'a, S: SerializeSeq> Drop for DiffContext<'a, S> {
+    fn drop(&mut self) {
+        if let Some(parent) = self.parent_element_stack.take() {
+            if let Some(mut stack) = self.element_stack.take() {
+                if self.element_stack_start < stack.len() {
+                    stack.drain(self.element_stack_start..);
+                }
+                parent.replace(stack);
+            }
+        }
+    }
 }
 
 impl<'a, S: SerializeSeq> DiffContext<'a, S> {
+    /// Mode for serializing field paths
+    pub fn field_path_mode(&self) -> FieldPathMode {
+        self.field_path_mode
+    }
     /// Called when we visit a field. If the structure is recursive (i.e. struct within struct,
     /// elements within an array) this may be called more than once before a corresponding pop_path_element
     /// is called. See `pop_path_element`
     pub fn push_field(&mut self, field_name: &'static str) {
-        self.field_stack
-            .push(DiffPathElementValue::Field(Cow::Borrowed(field_name)));
+        self.element_stack
+            .as_mut()
+            .unwrap()
+            .push(ElementStackEntry::PathElement(DiffPathElementValue::Field(
+                Cow::Borrowed(field_name),
+            )));
+    }
+    /// Called when we visit a field. If the structure is recursive (i.e. struct within struct,
+    /// elements within an array) this may be called more than once before a corresponding pop_path_element
+    /// is called. See `pop_path_element`
+    pub fn push_field_index(&mut self, field_idx: u16) {
+        self.element_stack
+            .as_mut()
+            .unwrap()
+            .push(ElementStackEntry::PathElement(
+                DiffPathElementValue::FieldIndex(field_idx),
+            ));
     }
     /// Called when we visit an element within an indexed collection
     pub fn push_collection_index(&mut self, idx: usize) {
-        self.field_stack
-            .push(DiffPathElementValue::CollectionIndex(idx));
+        self.element_stack
+            .as_mut()
+            .unwrap()
+            .push(ElementStackEntry::PathElement(
+                DiffPathElementValue::CollectionIndex(idx),
+            ));
     }
     /// Called when we visit an element within a collection that is new
     pub fn push_collection_add(&mut self) {
-        self.field_stack.push(DiffPathElementValue::AddToCollection);
+        self.element_stack
+            .as_mut()
+            .unwrap()
+            .push(ElementStackEntry::PathElement(
+                DiffPathElementValue::AddToCollection,
+            ));
     }
-    /// Called when we finish visiting a field. See `push_field` for details
+    pub fn push_field_element(&mut self, f: &'a dyn Fn(&mut S) -> Result<(), S::Error>) {
+        self.element_stack
+            .as_mut()
+            .unwrap()
+            .push(ElementStackEntry::Closure(f));
+    }
+    /// Called when we finish visiting an element. See `push_field` for details
     pub fn pop_path_element(&mut self) -> Result<(), S::Error> {
-        if self.field_stack.is_empty() {
-            // if we don't have any buffered fields, we just write Exit command directly to the serializer
+        let element_stack = self.element_stack.as_mut().unwrap();
+        if element_stack.is_empty() {
+            // if we don't have any buffered elements, we just write Exit command directly to the serializer
             // if we've just written a field, skip the Exit
             if !self.implicit_exit_written {
                 let cmd = DiffCommandRef::<()>::Exit;
@@ -96,12 +164,13 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
                 Ok(())
             }
         } else {
-            self.field_stack.pop();
+            element_stack.pop();
+            self.element_stack_start = std::cmp::min(element_stack.len(), self.element_stack_start);
             Ok(())
         }
     }
 
-    /// Stores a value for an element that has previously been pushed using push_field.
+    /// Stores a value for an element that has previously been pushed using push_field or similar.
     pub fn save_value<T: Serialize>(&mut self, value: &T) -> Result<(), S::Error> {
         self.save_command(&DiffCommandRef::Value(value), true)
     }
@@ -112,15 +181,57 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
         value: &DiffCommandRef<'b, T>,
         implicit_exit: bool,
     ) -> Result<(), S::Error> {
-        if !self.field_stack.is_empty() {
-            // flush buffered fields as Enter commands
-            for field in self.field_stack.drain(0..self.field_stack.len()) {
-                self.serializer
-                    .serialize_element(&DiffCommandRef::<()>::Enter(field))?;
+        let element_stack = self.element_stack.as_mut().unwrap();
+        if !element_stack.is_empty() {
+            // flush buffered elements as Enter* commands
+            for element in element_stack.drain(0..element_stack.len()) {
+                match element {
+                    ElementStackEntry::PathElement(element) => self
+                        .serializer
+                        .serialize_element(&DiffCommandRef::<()>::Enter(element))?,
+                    ElementStackEntry::Closure(closure) => (closure)(&mut self.serializer)?,
+                };
             }
+            self.element_stack_start = 0;
         }
         self.implicit_exit_written = implicit_exit;
         self.serializer.serialize_element(value)
+    }
+
+    pub fn reborrow<'c, 'd: 'c>(&'d mut self) -> DiffContext<'c, S>
+    where
+        'a: 'c,
+        'a: 'd,
+    {
+        let element_stack = self.element_stack.take();
+        // Some background on this then..
+        // HashMaps need to be able to serialize any T as keys for EnterKey(T).
+        // The usual approach to Enter* commands is to push element paths to the element stack,
+        // then flush the stack into the serialized stream when we encounter a value that has changed.
+        // For any T, we need to push a type-erased closure that contains a reference to something that
+        // might life on the stack. This is why reborrow() exists - to create a smaller scoped lifetime
+        // that can be used to push such closures that live on the stack.
+        // The following transmute changes the lifetime constraints on the elements in the Vec to be
+        // limited to the lifetime of the newly created context. The ownership of the Vec is then moved
+        // to the parent context.
+        // Safety invariant:
+        // In Drop, we have to make sure that any elements that could have been created by this sub-context
+        // are removed from the Vec before passing the ownership back to the parent.
+
+        let element_stack_ref = unsafe {
+            std::mem::transmute::<
+                &'d mut Option<Vec<ElementStackEntry<'a, S>>>,
+                &'c mut Option<Vec<ElementStackEntry<'c, S>>>,
+            >(&mut self.element_stack)
+        };
+        DiffContext {
+            element_stack_start: element_stack.as_ref().unwrap().len(),
+            element_stack,
+            parent_element_stack: Some(element_stack_ref),
+            serializer: &mut *self.serializer,
+            implicit_exit_written: self.implicit_exit_written,
+            field_path_mode: self.field_path_mode,
+        }
     }
 }
 
@@ -130,12 +241,28 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
 pub struct Diff<'a, 'b, T> {
     old: &'a T,
     new: &'b T,
+    field_path_mode: FieldPathMode,
 }
 impl<'a, 'b, T: SerdeDiff + 'a + 'b> Diff<'a, 'b, T> {
     /// Create a serializable Diff, which when serialized will write the differences between the old
     /// and new value into the serializer in the form of a sequence of diff commands
     pub fn serializable(old: &'a T, new: &'b T) -> Self {
-        Self { old, new }
+        Self {
+            old,
+            new,
+            field_path_mode: FieldPathMode::Name,
+        }
+    }
+
+    /// Create a serializable Diff, which when serialized will write the differences between the old
+    /// and new value into the serializer in the form of a sequence of diff commands
+    /// `field_path_mode` specifies how field paths should be serialized.
+    pub fn serializable_with_mode(old: &'a T, new: &'b T, field_path_mode: FieldPathMode) -> Self {
+        Self {
+            old,
+            new,
+            field_path_mode,
+        }
     }
 
     /// Writes the differences between the old and new value into the given serializer in the form
@@ -155,12 +282,17 @@ impl<'a, 'b, T: SerdeDiff> Serialize for Diff<'a, 'b, T> {
         let num_elements = if !serializer.is_human_readable() {
             let mut serializer = CountingSerializer { num_elements: 0 };
             let mut seq = serializer.serialize_seq(None).unwrap();
-            let mut ctx = DiffContext {
-                field_stack: Vec::new(),
-                serializer: &mut seq,
-                implicit_exit_written: false,
-            };
-            self.old.diff(&mut ctx, &self.new).unwrap();
+            {
+                let mut ctx = DiffContext {
+                    element_stack_start: 0,
+                    element_stack: Some(Vec::new()),
+                    serializer: &mut seq,
+                    implicit_exit_written: false,
+                    parent_element_stack: None,
+                    field_path_mode: self.field_path_mode,
+                };
+                self.old.diff(&mut ctx, &self.new).unwrap();
+            }
             seq.end().unwrap();
             Some(serializer.num_elements)
         } else {
@@ -169,15 +301,20 @@ impl<'a, 'b, T: SerdeDiff> Serialize for Diff<'a, 'b, T> {
 
         // Setup the context, starting a sequence on the serializer
         let mut seq = serializer.serialize_seq(num_elements)?;
-        let mut ctx = DiffContext {
-            field_stack: Vec::new(),
-            serializer: &mut seq,
-            implicit_exit_written: false,
-        };
+        {
+            let mut ctx = DiffContext {
+                element_stack_start: 0,
+                element_stack: Some(Vec::new()),
+                serializer: &mut seq,
+                implicit_exit_written: false,
+                parent_element_stack: None,
+                field_path_mode: self.field_path_mode,
+            };
 
-        // Do the actual comparison, writing diff commands (see DiffCommandRef, DiffCommandValue)
-        // into the sequence
-        self.old.diff(&mut ctx, &self.new)?;
+            // Do the actual comparison, writing diff commands (see DiffCommandRef, DiffCommandValue)
+            // into the sequence
+            self.old.diff(&mut ctx, &self.new)?;
+        }
 
         // End the sequence on the serializer
         Ok(seq.end()?)
@@ -355,7 +492,7 @@ struct DiffCommandDeserWrapper<'a, T> {
 // This monstrosity is based off the output of the derive macro for DiffCommand.
 // The justification for this is that we want to use Deserialize::deserialize_in_place
 // for DiffCommand::Value in order to support zero-copy deserialization of T.
-// This is achieved by passing &mut T through the DiffCommandDeserWrapper, which parsers the enum
+// This is achieved by passing &mut T through the DiffCommandDeserWrapper, which parses the enum
 // to the DeserWrapper which calls Deserialize::deserialize_in_place.
 #[allow(non_camel_case_types)]
 enum DiffCommandField {
@@ -626,6 +763,7 @@ pub enum DiffPathElementValue<'a> {
     /// A struct field
     #[serde(borrow)]
     Field(Cow<'a, str>),
+    FieldIndex(u16),
     CollectionIndex(usize),
     AddToCollection,
 }
@@ -748,8 +886,10 @@ macro_rules! map_serde_diff {
                 for (key, self_value) in self.iter() {
                     match other.get(key) {
                         Some(other_value) => {
-                            ctx.save_command(&DiffCommandRef::EnterKey(key), true)?;
-                            if <V as SerdeDiff>::diff(self_value, ctx, other_value)? {
+                            let save_closure = |serializer: &mut S| serializer.serialize_element(&DiffCommandRef::EnterKey(key));
+                            let mut subctx = ctx.reborrow();
+                            subctx.push_field_element(&save_closure);
+                            if <V as SerdeDiff>::diff(self_value, &mut subctx, other_value)? {
                                 changed = true;
                             }
                         },

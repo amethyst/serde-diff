@@ -277,10 +277,12 @@ impl ApplyContext {
         // this tries to skip the value without knowing the type - not possible for some formats..
         while let Some(cmd) = seq.next_element_seed(DiffCommandIgnoreValue {})? {
             match cmd {
-                DiffCommandValue::Enter(_) | DiffCommandValue::AddKey(_) | DiffCommandValue::EnterKey(_) => depth += 1,
+                DiffCommandValue::Enter(_)
+                | DiffCommandValue::AddKey(_)
+                | DiffCommandValue::EnterKey(_) => depth += 1,
                 DiffCommandValue::Exit => depth -= 1,
                 DiffCommandValue::Value(_) | DiffCommandValue::Remove(_) => depth -= 1, // ignore value, but reduce depth, as it is an implicit Exit
-                DiffCommandValue::RemoveKey(_) => {},
+                DiffCommandValue::RemoveKey(_) => {}
                 DiffCommandValue::Nothing | DiffCommandValue::DeserializedValue => {
                     panic!("should never serialize cmd Nothing or DeserializedValue")
                 }
@@ -366,7 +368,15 @@ enum DiffCommandField {
     Exit,
 }
 struct DiffCommandFieldVisitor;
-const VARIANTS: &'static [&'static str] = &["Enter", "Value", "Remove", "AddKey", "EnterKey", "RemoveKey", "Exit"];
+const VARIANTS: &'static [&'static str] = &[
+    "Enter",
+    "Value",
+    "Remove",
+    "AddKey",
+    "EnterKey",
+    "RemoveKey",
+    "Exit",
+];
 impl<'de> de::Visitor<'de> for DiffCommandFieldVisitor {
     type Value = DiffCommandField;
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -467,7 +477,10 @@ where
                             de::VariantAccess::newtype_variant::<DiffPathElementValue>(variant)?;
                         Ok(DiffCommandValue::Enter(enter))
                     }
-                    (DiffCommandField::Value, variant) | (DiffCommandField::AddKey, variant) | (DiffCommandField::EnterKey, variant) | (DiffCommandField::RemoveKey, variant) => {
+                    (DiffCommandField::Value, variant)
+                    | (DiffCommandField::AddKey, variant)
+                    | (DiffCommandField::EnterKey, variant)
+                    | (DiffCommandField::RemoveKey, variant) => {
                         de::VariantAccess::newtype_variant_seed::<DeserWrapper<T>>(
                             variant, self.seed,
                         )?;
@@ -533,7 +546,10 @@ impl<'de> de::DeserializeSeed<'de> for DiffCommandIgnoreValue {
                             de::VariantAccess::newtype_variant::<DiffPathElementValue>(variant)?;
                         Ok(DiffCommandValue::Enter(enter))
                     }
-                    (DiffCommandField::Value, variant) | (DiffCommandField::AddKey, variant) | (DiffCommandField::EnterKey, variant) | (DiffCommandField::RemoveKey, variant) => {
+                    (DiffCommandField::Value, variant)
+                    | (DiffCommandField::AddKey, variant)
+                    | (DiffCommandField::EnterKey, variant)
+                    | (DiffCommandField::RemoveKey, variant) => {
                         de::VariantAccess::newtype_variant::<de::IgnoredAny>(variant)?;
                         Ok(DiffCommandValue::Value(()))
                     }

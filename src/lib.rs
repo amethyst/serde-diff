@@ -652,6 +652,7 @@ impl<T: SerdeDiff + Serialize + for<'a> Deserialize<'a>> SerdeDiff for Vec<T> {
                     }
                     ctx.save_command::<()>(&DiffCommandRef::Remove(num_to_remove), true)?;
                     changed = true;
+                    need_exit = false;
                 }
                 (None, Some(other_item)) => {
                     ctx.save_command::<()>(

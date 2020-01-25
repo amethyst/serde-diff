@@ -5,7 +5,7 @@ use std::collections::HashMap;
 #[derive(SerdeDiff, Serialize, Deserialize, Debug, Default, PartialEq)]
 struct TestStruct {
     test: bool,
-    //#[serde_diff(inline)]
+    //#[serde_diff(opaque)]
     map: HashMap<String, Vec<String>>,
 }
 

@@ -11,25 +11,29 @@ pub fn macro_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     // Parse the struct
     let input = syn::parse_macro_input!(input as syn::DeriveInput);
     let struct_args = args::SerdeDiffStructArgs::from_derive_input(&input).unwrap();
-    let parsed_fields = parse_fields(&input);
 
-    // Check all parsed fields for any errors that may have occurred
-    let mut ok_fields: Vec<ParsedField> = vec![];
-    let mut errors = vec![];
-    for pf in parsed_fields {
-        match pf {
-            Ok(value) => ok_fields.push(value),
-            Err(e) => errors.push(e),
+    if struct_args.opaque {
+        generate_opaque(&input, struct_args)
+    } else {
+        let parsed_fields = parse_fields(&input);
+        // Check all parsed fields for any errors that may have occurred
+        let mut ok_fields: Vec<ParsedField> = vec![];
+        let mut errors = vec![];
+        for pf in parsed_fields {
+            match pf {
+                Ok(value) => ok_fields.push(value),
+                Err(e) => errors.push(e),
+            }
         }
-    }
 
-    // If any error occurred, return them all here
-    if !errors.is_empty() {
-        return proc_macro::TokenStream::from(darling::Error::multiple(errors).write_errors());
-    }
+        // If any error occurred, return them all here
+        if !errors.is_empty() {
+            return proc_macro::TokenStream::from(darling::Error::multiple(errors).write_errors());
+        }
 
-    // Go ahead and generate the code
-    generate(&input, struct_args, ok_fields)
+        // Go ahead and generate the code
+        generate(&input, struct_args, ok_fields)
+    }
 }
 
 /// Called per field to parse and verify it
@@ -82,7 +86,7 @@ fn generate(
         let ident_as_str = quote!(#ident).to_string();
         let ty = pf.field_args.ty();
 
-        if pf.field_args.inline() {
+        if pf.field_args.opaque() {
             diff_fn_field_handlers.push(quote! {
                 {
                     ctx.push_field(#ident_as_str);
@@ -127,7 +131,7 @@ fn generate(
         let ident_as_str = quote!(#ident).to_string();
         let ty = pf.field_args.ty();
 
-        if pf.field_args.inline() {
+        if pf.field_args.opaque() {
             apply_fn_field_handlers.push(quote!(
                 #ident_as_str => __changed__ |= ctx.read_value(seq, &mut self.#ident)?,
             ));
@@ -166,6 +170,38 @@ fn generate(
         impl SerdeDiff for #struct_name {
             #diff_fn
             #apply_fn
+        }
+    };
+
+    return proc_macro::TokenStream::from(quote! {
+        #diff_impl
+    });
+}
+
+fn generate_opaque(
+    _input: &syn::DeriveInput,
+    struct_args: args::SerdeDiffStructArgs,
+) -> proc_macro::TokenStream {
+    let struct_name = &struct_args.ident;
+    let diff_impl = quote! {
+        impl SerdeDiff for #struct_name {
+            fn diff<'a, S: serde_diff::_serde::ser::SerializeSeq>(&self, ctx: &mut serde_diff::DiffContext<'a, S>, other: &Self) -> Result<bool, S::Error> {
+                if self != other {
+                    ctx.save_value(other)?;
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
+            }
+            fn apply<'de, A>(
+                &mut self,
+                seq: &mut A,
+                ctx: &mut serde_diff::ApplyContext,
+            ) -> Result<bool, <A as serde_diff::_serde::de::SeqAccess<'de>>::Error>
+            where
+                A: serde_diff::_serde::de::SeqAccess<'de>, {
+                    ctx.read_value(seq, self)
+            }
         }
     };
 

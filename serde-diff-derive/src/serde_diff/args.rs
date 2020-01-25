@@ -6,6 +6,9 @@ use darling::{FromDeriveInput, FromField};
 pub struct SerdeDiffStructArgs {
     /// Name of the struct
     pub ident: syn::Ident,
+    /// Whether the struct is opaque or not
+    #[darling(default)]
+    pub opaque: bool,
 }
 
 /// Metadata from the struct's field annotations
@@ -24,7 +27,7 @@ pub struct SerdeDiffFieldArgs {
 
     /// If true, simple diff should be generated inline
     #[darling(default)]
-    inline: bool,
+    opaque: bool,
 }
 
 impl SerdeDiffFieldArgs {
@@ -44,7 +47,7 @@ impl SerdeDiffFieldArgs {
     }
 
     /// If true, this field should be ignored
-    pub fn inline(&self) -> bool {
-        return self.inline;
+    pub fn opaque(&self) -> bool {
+        return self.opaque;
     }
 }

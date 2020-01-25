@@ -9,7 +9,7 @@ use serde::{
 pub use serde_diff_derive::SerdeDiff;
 use std::{
     borrow::Cow,
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     hash::Hash,
 };
 
@@ -712,83 +712,91 @@ impl<T: SerdeDiff + Serialize + for<'a> Deserialize<'a>> SerdeDiff for Vec<T> {
     }
 }
 
-impl<K, V> SerdeDiff for HashMap<K, V>
-where
-    K: SerdeDiff + Serialize + for<'a> Deserialize<'a> + Hash + Eq,
-    V: SerdeDiff + Serialize + for<'a> Deserialize<'a>,
-{
-    fn diff<'a, S: SerializeSeq>(
-        &self,
-        ctx: &mut DiffContext<'a, S>,
-        other: &Self,
-    ) -> Result<bool, S::Error> {
-        let mut changed = false;
+/// Implement SerdeDiff on a "map-like" type such as HashMap.
+macro_rules! map_serde_diff {
+    ($t:ty, $($extra_traits:path),*) => {
+        impl<K, V> SerdeDiff for $t
+        where
+            K: SerdeDiff + Serialize + for<'a> Deserialize<'a> $(+ $extra_traits)*, // + Hash + Eq,
+            V: SerdeDiff + Serialize + for<'a> Deserialize<'a>,
+        {
+            fn diff<'a, S: SerializeSeq>(
+                &self,
+                ctx: &mut DiffContext<'a, S>,
+                other: &Self,
+            ) -> Result<bool, S::Error> {
+                let mut changed = false;
 
-        // TODO: detect renames
-        for (key, self_value) in self.iter() {
-            match other.get(key) {
-                Some(other_value) => {
-                    ctx.save_command(&DiffCommandRef::EnterKey(key), true)?;
-                    if <V as SerdeDiff>::diff(self_value, ctx, other_value)? {
+                // TODO: detect renames
+                for (key, self_value) in self.iter() {
+                    match other.get(key) {
+                        Some(other_value) => {
+                            ctx.save_command(&DiffCommandRef::EnterKey(key), true)?;
+                            if <V as SerdeDiff>::diff(self_value, ctx, other_value)? {
+                                changed = true;
+                            }
+                        },
+                        None => {
+                            ctx.save_command(&DiffCommandRef::RemoveKey(key), true)?;
+                            changed = true;
+                        },
+                    }
+                }
+
+                for (key, other_value) in other.iter() {
+                    if !self.contains_key(key) {
+                        ctx.save_command(&DiffCommandRef::AddKey(key), true)?;
+                        ctx.save_command(&DiffCommandRef::Value(other_value), true)?;
                         changed = true;
                     }
-                },
-                None => {
-                    ctx.save_command(&DiffCommandRef::RemoveKey(key), true)?;
-                    changed = true;
-                },
+                }
+
+                ctx.save_command::<()>(&DiffCommandRef::Exit, true)?;
+                Ok(changed)
+            }
+
+            fn apply<'de, A>(
+                &mut self,
+                seq: &mut A,
+                ctx: &mut ApplyContext,
+            ) -> Result<bool, <A as de::SeqAccess<'de>>::Error>
+            where
+                A: de::SeqAccess<'de>,
+            {
+                let mut changed = false;
+                while let Some(cmd) = ctx.read_next_command::<A, K>(seq)? {
+                    use DiffCommandValue::*;
+                    use DiffPathElementValue::*;
+                    match cmd {
+                        // we should not be getting fields when reading collection commands
+                        Enter(Field(_)) => {
+                            ctx.skip_value(seq)?;
+                            break;
+                        }
+                        AddKey(key) => if let Some(Value(v)) = ctx.read_next_command(seq)? {
+                            //changed |= self.insert(key, v).map(|old_val| v != old_val).unwrap_or(true);
+                            self.insert(key, v);
+                            changed = true;
+                        } else {
+                            panic!("Expected value after AddKey");
+                        }
+                        EnterKey(key) => if let Some(value_ref) = self.get_mut(&key) {
+                            changed |= <V as SerdeDiff>::apply(value_ref, seq, ctx)?;
+                        } else {
+                            ctx.skip_value(seq)?;
+                        }
+                        RemoveKey(key) => changed |= self.remove(&key).is_some(),
+                        _ => break,
+                    }
+                }
+                Ok(changed)
             }
         }
-
-        for (key, other_value) in other.iter() {
-            if !self.contains_key(key) {
-                ctx.save_command(&DiffCommandRef::AddKey(key), true)?;
-                ctx.save_command(&DiffCommandRef::Value(other_value), true)?;
-                changed = true;
-            }
-        }
-
-        ctx.save_command::<()>(&DiffCommandRef::Exit, true)?;
-        Ok(changed)
-    }
-
-    fn apply<'de, A>(
-        &mut self,
-        seq: &mut A,
-        ctx: &mut ApplyContext,
-    ) -> Result<bool, <A as de::SeqAccess<'de>>::Error>
-    where
-        A: de::SeqAccess<'de>,
-    {
-        let mut changed = false;
-        while let Some(cmd) = ctx.read_next_command::<A, K>(seq)? {
-            use DiffCommandValue::*;
-            use DiffPathElementValue::*;
-            match cmd {
-                // we should not be getting fields when reading collection commands
-                Enter(Field(_)) => {
-                    ctx.skip_value(seq)?;
-                    break;
-                }
-                AddKey(key) => if let Some(Value(v)) = ctx.read_next_command(seq)? {
-                    //changed |= self.insert(key, v).map(|old_val| v != old_val).unwrap_or(true);
-                    self.insert(key, v);
-                    changed = true;
-                } else {
-                    panic!("Expected value after AddKey");
-                }
-                EnterKey(key) => if let Some(value_ref) = self.get_mut(&key) {
-                    changed |= <V as SerdeDiff>::apply(value_ref, seq, ctx)?;
-                } else {
-                    ctx.skip_value(seq)?;
-                }
-                RemoveKey(key) => changed |= self.remove(&key).is_some(),
-                _ => break,
-            }
-        }
-        Ok(changed)
-    }
+    };
 }
+
+map_serde_diff!(HashMap<K, V>, Hash, Eq);
+map_serde_diff!(BTreeMap<K, V>, Ord);
 
 /// Implements SerdeDiff on a type given that it impls Serialize + Deserialize + PartialEq.
 /// This makes the type a "terminal" type in the SerdeDiff hierarchy, meaning deeper inspection

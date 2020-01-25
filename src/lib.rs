@@ -768,7 +768,9 @@ macro_rules! map_serde_diff {
                     }
                 }
 
-                ctx.save_command::<()>(&DiffCommandRef::Exit, true)?;
+                if changed {
+                    ctx.save_command::<()>(&DiffCommandRef::Exit, true)?;
+                }
                 Ok(changed)
             }
 

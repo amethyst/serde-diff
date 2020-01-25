@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use crate as serde_diff;
 #[doc(hidden)]
 pub use serde as _serde;

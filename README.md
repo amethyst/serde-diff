@@ -54,7 +54,7 @@ serde_json
 [dependencies]
 serde-diff = "0.1.3"
 serde = "1"
-serde_json = "1" // all serde formats are supported, serde_json is shown in this example
+serde_json = "1" # all serde formats are supported, serde_json is shown in this example
 ```
 `main.rs`
 ```rust

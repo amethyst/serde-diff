@@ -11,6 +11,7 @@ use std::{
     borrow::Cow,
     collections::{BTreeMap, HashMap},
     hash::Hash,
+    cell::Cell
 };
 
 // NEXT STEPS:
@@ -84,6 +85,8 @@ pub struct DiffContext<'a, S: SerializeSeq> {
     element_stack_start: usize,
     /// Mode for serializing field paths
     field_path_mode: FieldPathMode,
+    /// Set to true if any change is detected
+    has_changes: bool,
 }
 
 impl<'a, S: SerializeSeq> Drop for DiffContext<'a, S> {
@@ -104,6 +107,12 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
     pub fn field_path_mode(&self) -> FieldPathMode {
         self.field_path_mode
     }
+
+    /// True if a change operation has been written
+    pub fn has_changes(&self) -> bool {
+        self.has_changes
+    }
+
     /// Called when we visit a field. If the structure is recursive (i.e. struct within struct,
     /// elements within an array) this may be called more than once before a corresponding pop_path_element
     /// is called. See `pop_path_element`
@@ -172,7 +181,7 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
 
     /// Stores a value for an element that has previously been pushed using push_field or similar.
     pub fn save_value<T: Serialize>(&mut self, value: &T) -> Result<(), S::Error> {
-        self.save_command(&DiffCommandRef::Value(value), true)
+        self.save_command(&DiffCommandRef::Value(value), true, true)
     }
     /// Stores an arbitrary DiffCommand to be handled by the type.
     /// Any custom sequence of DiffCommands must be followed by Exit.
@@ -180,6 +189,7 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
         &mut self,
         value: &DiffCommandRef<'b, T>,
         implicit_exit: bool,
+        is_change: bool
     ) -> Result<(), S::Error> {
         let element_stack = self.element_stack.as_mut().unwrap();
         if !element_stack.is_empty() {
@@ -194,6 +204,7 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
             }
             self.element_stack_start = 0;
         }
+        self.has_changes |= is_change;
         self.implicit_exit_written = implicit_exit;
         self.serializer.serialize_element(value)
     }
@@ -231,6 +242,7 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
             serializer: &mut *self.serializer,
             implicit_exit_written: self.implicit_exit_written,
             field_path_mode: self.field_path_mode,
+            has_changes: false,
         }
     }
 }
@@ -242,7 +254,11 @@ pub struct Diff<'a, 'b, T> {
     old: &'a T,
     new: &'b T,
     field_path_mode: FieldPathMode,
+
+    // This is a cell to provide interior mutability
+    has_changes: Cell<bool>,
 }
+
 impl<'a, 'b, T: SerdeDiff + 'a + 'b> Diff<'a, 'b, T> {
     /// Create a serializable Diff, which when serialized will write the differences between the old
     /// and new value into the serializer in the form of a sequence of diff commands
@@ -251,6 +267,7 @@ impl<'a, 'b, T: SerdeDiff + 'a + 'b> Diff<'a, 'b, T> {
             old,
             new,
             field_path_mode: FieldPathMode::Name,
+            has_changes: Cell::new(false),
         }
     }
 
@@ -262,6 +279,7 @@ impl<'a, 'b, T: SerdeDiff + 'a + 'b> Diff<'a, 'b, T> {
             old,
             new,
             field_path_mode,
+            has_changes: Cell::new(false),
         }
     }
 
@@ -270,12 +288,19 @@ impl<'a, 'b, T: SerdeDiff + 'a + 'b> Diff<'a, 'b, T> {
     pub fn diff<S: Serializer>(serializer: S, old: &'a T, new: &'b T) -> Result<S::Ok, S::Error> {
         Self::serializable(old, new).serialize(serializer)
     }
+
+    /// True if a change was detected during the diff
+    pub fn has_changes(&self) -> bool {
+        self.has_changes.get()
+    }
 }
 impl<'a, 'b, T: SerdeDiff> Serialize for Diff<'a, 'b, T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
+        self.has_changes.set(false);
+
         // Count the number of elements
         // This may only be needed for certain serializers like bincode,
         // so we assume that it's only required if the serializer format is not human readable.
@@ -290,6 +315,7 @@ impl<'a, 'b, T: SerdeDiff> Serialize for Diff<'a, 'b, T> {
                     implicit_exit_written: false,
                     parent_element_stack: None,
                     field_path_mode: self.field_path_mode,
+                    has_changes: false,
                 };
                 self.old.diff(&mut ctx, &self.new).unwrap();
             }
@@ -309,11 +335,13 @@ impl<'a, 'b, T: SerdeDiff> Serialize for Diff<'a, 'b, T> {
                 implicit_exit_written: false,
                 parent_element_stack: None,
                 field_path_mode: self.field_path_mode,
+                has_changes: false,
             };
 
             // Do the actual comparison, writing diff commands (see DiffCommandRef, DiffCommandValue)
             // into the sequence
             self.old.diff(&mut ctx, &self.new)?;
+            self.has_changes.set(ctx.has_changes);
         }
 
         // End the sequence on the serializer
@@ -788,7 +816,7 @@ impl<T: SerdeDiff + Serialize + for<'a> Deserialize<'a>> SerdeDiff for Vec<T> {
                     while self_iter.next().is_some() {
                         num_to_remove += 1;
                     }
-                    ctx.save_command::<()>(&DiffCommandRef::Remove(num_to_remove), true)?;
+                    ctx.save_command::<()>(&DiffCommandRef::Remove(num_to_remove), true, true)?;
                     changed = true;
                     need_exit = false;
                 }
@@ -796,8 +824,9 @@ impl<T: SerdeDiff + Serialize + for<'a> Deserialize<'a>> SerdeDiff for Vec<T> {
                     ctx.save_command::<()>(
                         &DiffCommandRef::Enter(DiffPathElementValue::AddToCollection),
                         false,
+                        true
                     )?;
-                    ctx.save_command(&DiffCommandRef::Value(other_item), true)?;
+                    ctx.save_command(&DiffCommandRef::Value(other_item), true, true)?;
                     need_exit = true;
                     changed = true;
                 }
@@ -813,7 +842,7 @@ impl<T: SerdeDiff + Serialize + for<'a> Deserialize<'a>> SerdeDiff for Vec<T> {
             idx += 1;
         }
         if need_exit {
-            ctx.save_command::<()>(&DiffCommandRef::Exit, true)?;
+            ctx.save_command::<()>(&DiffCommandRef::Exit, true, false)?;
         }
         Ok(changed)
     }
@@ -894,7 +923,7 @@ macro_rules! map_serde_diff {
                             }
                         },
                         None => {
-                            ctx.save_command(&DiffCommandRef::RemoveKey(key), true)?;
+                            ctx.save_command(&DiffCommandRef::RemoveKey(key), true, true)?;
                             changed = true;
                         },
                     }
@@ -902,14 +931,14 @@ macro_rules! map_serde_diff {
 
                 for (key, other_value) in other.iter() {
                     if !self.contains_key(key) {
-                        ctx.save_command(&DiffCommandRef::AddKey(key), true)?;
-                        ctx.save_command(&DiffCommandRef::Value(other_value), true)?;
+                        ctx.save_command(&DiffCommandRef::AddKey(key), true, true)?;
+                        ctx.save_command(&DiffCommandRef::Value(other_value), true, true)?;
                         changed = true;
                     }
                 }
 
                 if changed {
-                    ctx.save_command::<()>(&DiffCommandRef::Exit, true)?;
+                    ctx.save_command::<()>(&DiffCommandRef::Exit, true, false)?;
                 }
                 Ok(changed)
             }

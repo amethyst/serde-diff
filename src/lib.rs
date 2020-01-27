@@ -763,7 +763,7 @@ macro_rules! tuple_impls {
                 ) -> Result<bool, S::Error> {
                     let mut changed = false;
                     $(
-                        ctx.push_field(stringify!($name));
+                        ctx.push_field(stringify!($n));
                         changed |= <$name as serde_diff::SerdeDiff>::diff(&self.$n, ctx, &other.$n)?;
                         ctx.pop_path_element()?;
                     )+
@@ -782,7 +782,7 @@ macro_rules! tuple_impls {
                     while let Some(serde_diff::DiffPathElementValue::Field(element)) = ctx.next_path_element(seq)? {
                         match element.as_ref() {
                             $(
-                                stringify!($name) => changed |= <$name as serde_diff::SerdeDiff>::apply(&mut self.$n, seq, ctx)?,
+                                stringify!($n) => changed |= <$name as serde_diff::SerdeDiff>::apply(&mut self.$n, seq, ctx)?,
                             )+
                             _ => ctx.skip_value(seq)?,
                         }

@@ -10,7 +10,12 @@ use serde::{
     Deserialize, Serialize, Serializer,
 };
 pub use serde_diff_derive::SerdeDiff;
-use std::borrow::Cow;
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, HashMap},
+    hash::Hash,
+    cell::Cell
+};
 
 // NEXT STEPS:
 // - Decouple from serde_json as much as possible. We might need to use a "stream" format with
@@ -53,39 +58,115 @@ pub trait SerdeDiff {
         A: de::SeqAccess<'de>;
 }
 
+#[derive(Copy, Clone)]
+pub enum FieldPathMode {
+    Name,
+    Index,
+}
+enum ElementStackEntry<'a, S: SerializeSeq> {
+    PathElement(DiffPathElementValue<'a>),
+    Closure(&'a dyn Fn(&mut S) -> Result<(), S::Error>),
+}
 /// Used during a diff operation for transient data used during the diff
 #[doc(hidden)]
 pub struct DiffContext<'a, S: SerializeSeq> {
     /// As we descend into fields recursively, the field names (or other "placement" indicators like
     /// array indexes) are pushed and popped to/from this stack
-    field_stack: Vec<DiffPathElementValue<'a>>,
+    element_stack: Option<Vec<ElementStackEntry<'a, S>>>,
     /// Reference to the serializer used to save the data
     serializer: &'a mut S,
     /// some commands are implicit Exit to save space, so we set a flag to avoid writing the next Exit
     implicit_exit_written: bool,
+    /// When pushing field path elements, sometimes we need to narrow the lifetime.
+    /// parent_element_stack contains a reference to the parent DiffContext's element_stack.
+    parent_element_stack: Option<&'a mut Option<Vec<ElementStackEntry<'a, S>>>>,
+    /// Contains the minimum index in the element stack at which this context has pushed elements.
+    /// When the context is dropped, we have to make sure we have dropped all elements
+    /// >= index before we can pass the element stack back to the parent.
+    /// This is to ensure the safety invariant that a sub-context's (a `reborrow`ed context)
+    /// pushed elements cannot live longer than the sub-context itself.
+    element_stack_start: usize,
+    /// Mode for serializing field paths
+    field_path_mode: FieldPathMode,
+    /// Set to true if any change is detected
+    has_changes: bool,
+}
+
+impl<'a, S: SerializeSeq> Drop for DiffContext<'a, S> {
+    fn drop(&mut self) {
+        if let Some(parent) = self.parent_element_stack.take() {
+            if let Some(mut stack) = self.element_stack.take() {
+                if self.element_stack_start < stack.len() {
+                    stack.drain(self.element_stack_start..);
+                }
+                parent.replace(stack);
+            }
+        }
+    }
 }
 
 impl<'a, S: SerializeSeq> DiffContext<'a, S> {
+    /// Mode for serializing field paths
+    pub fn field_path_mode(&self) -> FieldPathMode {
+        self.field_path_mode
+    }
+
+    /// True if a change operation has been written
+    pub fn has_changes(&self) -> bool {
+        self.has_changes
+    }
+
     /// Called when we visit a field. If the structure is recursive (i.e. struct within struct,
     /// elements within an array) this may be called more than once before a corresponding pop_path_element
     /// is called. See `pop_path_element`
     pub fn push_field(&mut self, field_name: &'static str) {
-        self.field_stack
-            .push(DiffPathElementValue::Field(Cow::Borrowed(field_name)));
+        self.element_stack
+            .as_mut()
+            .unwrap()
+            .push(ElementStackEntry::PathElement(DiffPathElementValue::Field(
+                Cow::Borrowed(field_name),
+            )));
+    }
+    /// Called when we visit a field. If the structure is recursive (i.e. struct within struct,
+    /// elements within an array) this may be called more than once before a corresponding pop_path_element
+    /// is called. See `pop_path_element`
+    pub fn push_field_index(&mut self, field_idx: u16) {
+        self.element_stack
+            .as_mut()
+            .unwrap()
+            .push(ElementStackEntry::PathElement(
+                DiffPathElementValue::FieldIndex(field_idx),
+            ));
     }
     /// Called when we visit an element within an indexed collection
     pub fn push_collection_index(&mut self, idx: usize) {
-        self.field_stack
-            .push(DiffPathElementValue::CollectionIndex(idx));
+        self.element_stack
+            .as_mut()
+            .unwrap()
+            .push(ElementStackEntry::PathElement(
+                DiffPathElementValue::CollectionIndex(idx),
+            ));
     }
     /// Called when we visit an element within a collection that is new
     pub fn push_collection_add(&mut self) {
-        self.field_stack.push(DiffPathElementValue::AddToCollection);
+        self.element_stack
+            .as_mut()
+            .unwrap()
+            .push(ElementStackEntry::PathElement(
+                DiffPathElementValue::AddToCollection,
+            ));
     }
-    /// Called when we finish visiting a field. See `push_field` for details
+    pub fn push_field_element(&mut self, f: &'a dyn Fn(&mut S) -> Result<(), S::Error>) {
+        self.element_stack
+            .as_mut()
+            .unwrap()
+            .push(ElementStackEntry::Closure(f));
+    }
+    /// Called when we finish visiting an element. See `push_field` for details
     pub fn pop_path_element(&mut self) -> Result<(), S::Error> {
-        if self.field_stack.is_empty() {
-            // if we don't have any buffered fields, we just write Exit command directly to the serializer
+        let element_stack = self.element_stack.as_mut().unwrap();
+        if element_stack.is_empty() {
+            // if we don't have any buffered elements, we just write Exit command directly to the serializer
             // if we've just written a field, skip the Exit
             if !self.implicit_exit_written {
                 let cmd = DiffCommandRef::<()>::Exit;
@@ -95,14 +176,15 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
                 Ok(())
             }
         } else {
-            self.field_stack.pop();
+            element_stack.pop();
+            self.element_stack_start = std::cmp::min(element_stack.len(), self.element_stack_start);
             Ok(())
         }
     }
 
-    /// Stores a value for an element that has previously been pushed using push_field.
+    /// Stores a value for an element that has previously been pushed using push_field or similar.
     pub fn save_value<T: Serialize>(&mut self, value: &T) -> Result<(), S::Error> {
-        self.save_command(&DiffCommandRef::Value(value), true)
+        self.save_command(&DiffCommandRef::Value(value), true, true)
     }
     /// Stores an arbitrary DiffCommand to be handled by the type.
     /// Any custom sequence of DiffCommands must be followed by Exit.
@@ -110,16 +192,61 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
         &mut self,
         value: &DiffCommandRef<'b, T>,
         implicit_exit: bool,
+        is_change: bool
     ) -> Result<(), S::Error> {
-        if !self.field_stack.is_empty() {
-            // flush buffered fields as Enter commands
-            for field in self.field_stack.drain(0..self.field_stack.len()) {
-                self.serializer
-                    .serialize_element(&DiffCommandRef::<()>::Enter(field))?;
+        let element_stack = self.element_stack.as_mut().unwrap();
+        if !element_stack.is_empty() {
+            // flush buffered elements as Enter* commands
+            for element in element_stack.drain(0..element_stack.len()) {
+                match element {
+                    ElementStackEntry::PathElement(element) => self
+                        .serializer
+                        .serialize_element(&DiffCommandRef::<()>::Enter(element))?,
+                    ElementStackEntry::Closure(closure) => (closure)(&mut self.serializer)?,
+                };
             }
+            self.element_stack_start = 0;
         }
+        self.has_changes |= is_change;
         self.implicit_exit_written = implicit_exit;
         self.serializer.serialize_element(value)
+    }
+
+    pub fn reborrow<'c, 'd: 'c>(&'d mut self) -> DiffContext<'c, S>
+    where
+        'a: 'c,
+        'a: 'd,
+    {
+        let element_stack = self.element_stack.take();
+        // Some background on this then..
+        // HashMaps need to be able to serialize any T as keys for EnterKey(T).
+        // The usual approach to Enter* commands is to push element paths to the element stack,
+        // then flush the stack into the serialized stream when we encounter a value that has changed.
+        // For any T, we need to push a type-erased closure that contains a reference to something that
+        // might life on the stack. This is why reborrow() exists - to create a smaller scoped lifetime
+        // that can be used to push such closures that live on the stack.
+        // The following transmute changes the lifetime constraints on the elements in the Vec to be
+        // limited to the lifetime of the newly created context. The ownership of the Vec is then moved
+        // to the parent context.
+        // Safety invariant:
+        // In Drop, we have to make sure that any elements that could have been created by this sub-context
+        // are removed from the Vec before passing the ownership back to the parent.
+
+        let element_stack_ref = unsafe {
+            std::mem::transmute::<
+                &'d mut Option<Vec<ElementStackEntry<'a, S>>>,
+                &'c mut Option<Vec<ElementStackEntry<'c, S>>>,
+            >(&mut self.element_stack)
+        };
+        DiffContext {
+            element_stack_start: element_stack.as_ref().unwrap().len(),
+            element_stack,
+            parent_element_stack: Some(element_stack_ref),
+            serializer: &mut *self.serializer,
+            implicit_exit_written: self.implicit_exit_written,
+            field_path_mode: self.field_path_mode,
+            has_changes: false,
+        }
     }
 }
 
@@ -129,12 +256,34 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
 pub struct Diff<'a, 'b, T> {
     old: &'a T,
     new: &'b T,
+    field_path_mode: FieldPathMode,
+
+    // This is a cell to provide interior mutability
+    has_changes: Cell<bool>,
 }
+
 impl<'a, 'b, T: SerdeDiff + 'a + 'b> Diff<'a, 'b, T> {
     /// Create a serializable Diff, which when serialized will write the differences between the old
     /// and new value into the serializer in the form of a sequence of diff commands
     pub fn serializable(old: &'a T, new: &'b T) -> Self {
-        Self { old, new }
+        Self {
+            old,
+            new,
+            field_path_mode: FieldPathMode::Name,
+            has_changes: Cell::new(false),
+        }
+    }
+
+    /// Create a serializable Diff, which when serialized will write the differences between the old
+    /// and new value into the serializer in the form of a sequence of diff commands
+    /// `field_path_mode` specifies how field paths should be serialized.
+    pub fn serializable_with_mode(old: &'a T, new: &'b T, field_path_mode: FieldPathMode) -> Self {
+        Self {
+            old,
+            new,
+            field_path_mode,
+            has_changes: Cell::new(false),
+        }
     }
 
     /// Writes the differences between the old and new value into the given serializer in the form
@@ -142,24 +291,37 @@ impl<'a, 'b, T: SerdeDiff + 'a + 'b> Diff<'a, 'b, T> {
     pub fn diff<S: Serializer>(serializer: S, old: &'a T, new: &'b T) -> Result<S::Ok, S::Error> {
         Self::serializable(old, new).serialize(serializer)
     }
+
+    /// True if a change was detected during the diff
+    pub fn has_changes(&self) -> bool {
+        self.has_changes.get()
+    }
 }
 impl<'a, 'b, T: SerdeDiff> Serialize for Diff<'a, 'b, T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
+        self.has_changes.set(false);
+
         // Count the number of elements
         // This may only be needed for certain serializers like bincode,
         // so we assume that it's only required if the serializer format is not human readable.
         let num_elements = if !serializer.is_human_readable() {
             let mut serializer = CountingSerializer { num_elements: 0 };
             let mut seq = serializer.serialize_seq(None).unwrap();
-            let mut ctx = DiffContext {
-                field_stack: Vec::new(),
-                serializer: &mut seq,
-                implicit_exit_written: false,
-            };
-            self.old.diff(&mut ctx, &self.new).unwrap();
+            {
+                let mut ctx = DiffContext {
+                    element_stack_start: 0,
+                    element_stack: Some(Vec::new()),
+                    serializer: &mut seq,
+                    implicit_exit_written: false,
+                    parent_element_stack: None,
+                    field_path_mode: self.field_path_mode,
+                    has_changes: false,
+                };
+                self.old.diff(&mut ctx, &self.new).unwrap();
+            }
             seq.end().unwrap();
             Some(serializer.num_elements)
         } else {
@@ -168,15 +330,22 @@ impl<'a, 'b, T: SerdeDiff> Serialize for Diff<'a, 'b, T> {
 
         // Setup the context, starting a sequence on the serializer
         let mut seq = serializer.serialize_seq(num_elements)?;
-        let mut ctx = DiffContext {
-            field_stack: Vec::new(),
-            serializer: &mut seq,
-            implicit_exit_written: false,
-        };
+        {
+            let mut ctx = DiffContext {
+                element_stack_start: 0,
+                element_stack: Some(Vec::new()),
+                serializer: &mut seq,
+                implicit_exit_written: false,
+                parent_element_stack: None,
+                field_path_mode: self.field_path_mode,
+                has_changes: false,
+            };
 
-        // Do the actual comparison, writing diff commands (see DiffCommandRef, DiffCommandValue)
-        // into the sequence
-        self.old.diff(&mut ctx, &self.new)?;
+            // Do the actual comparison, writing diff commands (see DiffCommandRef, DiffCommandValue)
+            // into the sequence
+            self.old.diff(&mut ctx, &self.new)?;
+            self.has_changes.set(ctx.has_changes);
+        }
 
         // End the sequence on the serializer
         Ok(seq.end()?)
@@ -246,6 +415,10 @@ impl ApplyContext {
         use DiffCommandValue::*;
         let element = match seq.next_element_seed(DiffCommandIgnoreValue {})? {
             Some(Enter(element)) => Ok(Some(element)),
+            Some(AddKey(_)) | Some(EnterKey(_)) | Some(RemoveKey(_)) => {
+                //self.skip_value(seq);
+                Ok(None)
+            }
             Some(Value(_)) | Some(Remove(_)) => panic!("unexpected DiffCommand Value or Remove"),
             Some(Exit) | Some(Nothing) | Some(DeserializedValue) | None => Ok(None),
         };
@@ -272,9 +445,12 @@ impl ApplyContext {
         // this tries to skip the value without knowing the type - not possible for some formats..
         while let Some(cmd) = seq.next_element_seed(DiffCommandIgnoreValue {})? {
             match cmd {
-                DiffCommandValue::Enter(_) => depth += 1,
+                DiffCommandValue::Enter(_)
+                | DiffCommandValue::AddKey(_)
+                | DiffCommandValue::EnterKey(_) => depth += 1,
                 DiffCommandValue::Exit => depth -= 1,
                 DiffCommandValue::Value(_) | DiffCommandValue::Remove(_) => depth -= 1, // ignore value, but reduce depth, as it is an implicit Exit
+                DiffCommandValue::RemoveKey(_) => {}
                 DiffCommandValue::Nothing | DiffCommandValue::DeserializedValue => {
                     panic!("should never serialize cmd Nothing or DeserializedValue")
                 }
@@ -328,6 +504,9 @@ impl ApplyContext {
             cmd @ Some(DiffCommandValue::Remove(_))
             | cmd @ Some(DiffCommandValue::Value(_))
             | cmd @ Some(DiffCommandValue::Enter(_))
+            | cmd @ Some(DiffCommandValue::AddKey(_))
+            | cmd @ Some(DiffCommandValue::EnterKey(_))
+            | cmd @ Some(DiffCommandValue::RemoveKey(_))
             | cmd @ Some(DiffCommandValue::Exit) => cmd,
             _ => None,
         })
@@ -344,17 +523,28 @@ struct DiffCommandDeserWrapper<'a, T> {
 // This monstrosity is based off the output of the derive macro for DiffCommand.
 // The justification for this is that we want to use Deserialize::deserialize_in_place
 // for DiffCommand::Value in order to support zero-copy deserialization of T.
-// This is achieved by passing &mut T through the DiffCommandDeserWrapper, which parsers the enum
+// This is achieved by passing &mut T through the DiffCommandDeserWrapper, which parses the enum
 // to the DeserWrapper which calls Deserialize::deserialize_in_place.
 #[allow(non_camel_case_types)]
 enum DiffCommandField {
     Enter,
     Value,
     Remove,
+    AddKey,
+    EnterKey,
+    RemoveKey,
     Exit,
 }
 struct DiffCommandFieldVisitor;
-const VARIANTS: &'static [&'static str] = &["Enter", "Value", "Remove", "Exit"];
+const VARIANTS: &'static [&'static str] = &[
+    "Enter",
+    "Value",
+    "Remove",
+    "AddKey",
+    "EnterKey",
+    "RemoveKey",
+    "Exit",
+];
 impl<'de> de::Visitor<'de> for DiffCommandFieldVisitor {
     type Value = DiffCommandField;
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -368,10 +558,13 @@ impl<'de> de::Visitor<'de> for DiffCommandFieldVisitor {
             0u64 => Ok(DiffCommandField::Enter),
             1u64 => Ok(DiffCommandField::Value),
             2u64 => Ok(DiffCommandField::Remove),
-            3u64 => Ok(DiffCommandField::Exit),
+            3u64 => Ok(DiffCommandField::AddKey),
+            4u64 => Ok(DiffCommandField::EnterKey),
+            5u64 => Ok(DiffCommandField::RemoveKey),
+            6u64 => Ok(DiffCommandField::Exit),
             _ => Err(de::Error::invalid_value(
                 de::Unexpected::Unsigned(value),
-                &"variant index 0 <= i < 4",
+                &"variant index 0 <= i < 7",
             )),
         }
     }
@@ -383,6 +576,9 @@ impl<'de> de::Visitor<'de> for DiffCommandFieldVisitor {
             "Enter" => Ok(DiffCommandField::Enter),
             "Value" => Ok(DiffCommandField::Value),
             "Remove" => Ok(DiffCommandField::Remove),
+            "AddKey" => Ok(DiffCommandField::AddKey),
+            "EnterKey" => Ok(DiffCommandField::EnterKey),
+            "RemoveKey" => Ok(DiffCommandField::RemoveKey),
             "Exit" => Ok(DiffCommandField::Exit),
             _ => Err(de::Error::unknown_variant(value, VARIANTS)),
         }
@@ -395,6 +591,9 @@ impl<'de> de::Visitor<'de> for DiffCommandFieldVisitor {
             b"Enter" => Ok(DiffCommandField::Enter),
             b"Value" => Ok(DiffCommandField::Value),
             b"Remove" => Ok(DiffCommandField::Remove),
+            b"AddKey" => Ok(DiffCommandField::AddKey),
+            b"EnterKey" => Ok(DiffCommandField::EnterKey),
+            b"RemoveKey" => Ok(DiffCommandField::RemoveKey),
             b"Exit" => Ok(DiffCommandField::Exit),
             _ => {
                 let value = &serde::export::from_utf8_lossy(value);
@@ -446,7 +645,10 @@ where
                             de::VariantAccess::newtype_variant::<DiffPathElementValue>(variant)?;
                         Ok(DiffCommandValue::Enter(enter))
                     }
-                    (DiffCommandField::Value, variant) => {
+                    (DiffCommandField::Value, variant)
+                    | (DiffCommandField::AddKey, variant)
+                    | (DiffCommandField::EnterKey, variant)
+                    | (DiffCommandField::RemoveKey, variant) => {
                         de::VariantAccess::newtype_variant_seed::<DeserWrapper<T>>(
                             variant, self.seed,
                         )?;
@@ -512,7 +714,10 @@ impl<'de> de::DeserializeSeed<'de> for DiffCommandIgnoreValue {
                             de::VariantAccess::newtype_variant::<DiffPathElementValue>(variant)?;
                         Ok(DiffCommandValue::Enter(enter))
                     }
-                    (DiffCommandField::Value, variant) => {
+                    (DiffCommandField::Value, variant)
+                    | (DiffCommandField::AddKey, variant)
+                    | (DiffCommandField::EnterKey, variant)
+                    | (DiffCommandField::RemoveKey, variant) => {
                         de::VariantAccess::newtype_variant::<de::IgnoredAny>(variant)?;
                         Ok(DiffCommandValue::Value(()))
                     }
@@ -548,6 +753,14 @@ pub enum DiffCommandRef<'a, T: Serialize> {
     Value(&'a T),
     /// Remove N items from end of collection
     Remove(usize),
+    /// Add a key to a map
+    AddKey(&'a T),
+    /// Enter a key in a map.
+    /// This isn't part of Enter because then DiffPathElementValue would have to be generic over T
+    // Fortunately, keys on HashMaps are terminal as far as we're concerned.
+    EnterKey(&'a T),
+    /// Remove a key from a map
+    RemoveKey(&'a T),
     /// Exit a path element
     Exit,
 }
@@ -561,6 +774,12 @@ pub enum DiffCommandValue<'a, T> {
     Value(T),
     /// Remove N items from end of collection
     Remove(usize),
+    /// Add a key to a map
+    AddKey(T),
+    // Enter a key in a map
+    EnterKey(T),
+    /// Remove a key from a map
+    RemoveKey(T),
     // Exit a path element
     Exit,
     // Never serialized
@@ -575,6 +794,7 @@ pub enum DiffPathElementValue<'a> {
     /// A struct field
     #[serde(borrow)]
     Field(Cow<'a, str>),
+    FieldIndex(u16),
     CollectionIndex(usize),
     AddToCollection,
 }
@@ -600,15 +820,17 @@ impl<T: SerdeDiff + Serialize + for<'a> Deserialize<'a>> SerdeDiff for Vec<T> {
                     while self_iter.next().is_some() {
                         num_to_remove += 1;
                     }
-                    ctx.save_command::<()>(&DiffCommandRef::Remove(num_to_remove), true)?;
+                    ctx.save_command::<()>(&DiffCommandRef::Remove(num_to_remove), true, true)?;
                     changed = true;
+                    need_exit = false;
                 }
                 (None, Some(other_item)) => {
                     ctx.save_command::<()>(
                         &DiffCommandRef::Enter(DiffPathElementValue::AddToCollection),
                         false,
+                        true
                     )?;
-                    ctx.save_command(&DiffCommandRef::Value(other_item), true)?;
+                    ctx.save_command(&DiffCommandRef::Value(other_item), true, true)?;
                     need_exit = true;
                     changed = true;
                 }
@@ -624,7 +846,7 @@ impl<T: SerdeDiff + Serialize + for<'a> Deserialize<'a>> SerdeDiff for Vec<T> {
             idx += 1;
         }
         if need_exit {
-            ctx.save_command::<()>(&DiffCommandRef::Exit, true)?;
+            ctx.save_command::<()>(&DiffCommandRef::Exit, true, false)?;
         }
         Ok(changed)
     }
@@ -812,6 +1034,95 @@ tuple_impls! {
     15 => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7 8 T8 9 T9 10 T10 11 T11 12 T12 13 T13 14 T14)
     16 => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7 8 T8 9 T9 10 T10 11 T11 12 T12 13 T13 14 T14 15 T15)
 }
+/// Implement SerdeDiff on a "map-like" type such as HashMap.
+macro_rules! map_serde_diff {
+    ($t:ty, $($extra_traits:path),*) => {
+        impl<K, V> SerdeDiff for $t
+        where
+            K: SerdeDiff + Serialize + for<'a> Deserialize<'a> $(+ $extra_traits)*, // + Hash + Eq,
+            V: SerdeDiff + Serialize + for<'a> Deserialize<'a>,
+        {
+            fn diff<'a, S: SerializeSeq>(
+                &self,
+                ctx: &mut DiffContext<'a, S>,
+                other: &Self,
+            ) -> Result<bool, S::Error> {
+                let mut changed = false;
+
+                // TODO: detect renames
+                for (key, self_value) in self.iter() {
+                    match other.get(key) {
+                        Some(other_value) => {
+                            let save_closure = |serializer: &mut S| serializer.serialize_element(&DiffCommandRef::EnterKey(key));
+                            let mut subctx = ctx.reborrow();
+                            subctx.push_field_element(&save_closure);
+                            if <V as SerdeDiff>::diff(self_value, &mut subctx, other_value)? {
+                                changed = true;
+                            }
+                        },
+                        None => {
+                            ctx.save_command(&DiffCommandRef::RemoveKey(key), true, true)?;
+                            changed = true;
+                        },
+                    }
+                }
+
+                for (key, other_value) in other.iter() {
+                    if !self.contains_key(key) {
+                        ctx.save_command(&DiffCommandRef::AddKey(key), true, true)?;
+                        ctx.save_command(&DiffCommandRef::Value(other_value), true, true)?;
+                        changed = true;
+                    }
+                }
+
+                if changed {
+                    ctx.save_command::<()>(&DiffCommandRef::Exit, true, false)?;
+                }
+                Ok(changed)
+            }
+
+            fn apply<'de, A>(
+                &mut self,
+                seq: &mut A,
+                ctx: &mut ApplyContext,
+            ) -> Result<bool, <A as de::SeqAccess<'de>>::Error>
+            where
+                A: de::SeqAccess<'de>,
+            {
+                let mut changed = false;
+                while let Some(cmd) = ctx.read_next_command::<A, K>(seq)? {
+                    use DiffCommandValue::*;
+                    use DiffPathElementValue::*;
+                    match cmd {
+                        // we should not be getting fields when reading collection commands
+                        Enter(Field(_)) => {
+                            ctx.skip_value(seq)?;
+                            break;
+                        }
+                        AddKey(key) => if let Some(Value(v)) = ctx.read_next_command(seq)? {
+                            //changed |= self.insert(key, v).map(|old_val| v != old_val).unwrap_or(true);
+                            self.insert(key, v);
+                            changed = true;
+                        } else {
+                            panic!("Expected value after AddKey");
+                        }
+                        EnterKey(key) => if let Some(value_ref) = self.get_mut(&key) {
+                            changed |= <V as SerdeDiff>::apply(value_ref, seq, ctx)?;
+                        } else {
+                            ctx.skip_value(seq)?;
+                        }
+                        RemoveKey(key) => changed |= self.remove(&key).is_some(),
+                        _ => break,
+                    }
+                }
+                Ok(changed)
+            }
+        }
+    };
+}
+
+map_serde_diff!(HashMap<K, V>, Hash, Eq);
+map_serde_diff!(BTreeMap<K, V>, Ord);
 
 /// Implements SerdeDiff on a type given that it impls Serialize + Deserialize + PartialEq.
 /// This makes the type a "terminal" type in the SerdeDiff hierarchy, meaning deeper inspection

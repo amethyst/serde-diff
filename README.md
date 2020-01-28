@@ -15,10 +15,6 @@ The SerdeDiff trait impl can serialize field paths recursively, greatly reducing
 [doc_img]: https://docs.rs/serde-diff/badge.svg
 [doc_lnk]: https://docs.rs/serde-diff
 
-## Status
-
-Works for most basic use-cases. Includes derive macro, some standard library type implementations and deep serde integration. Supports diffing Vec<T>. Supports both text and binary serde formats.
-
 ## Usage
 On a struct:
 ```rust
@@ -41,6 +37,16 @@ serde_json
         Apply::apply(&mut deserializer, &mut target).unwrap();
 ```
 
+## Built-in type support
+- [x] Primitive types
+- [x] std::time::{Duration, SystemTime}
+- [x] IP addresses in std
+- [x] Vec
+- [x] HashMap (thanks @milkey-mouse)
+- [x] BTreeMap (thanks @milkey-mouse)
+- [x] Fixed-size arrays (thanks @Boscop)
+- [x] Tuples (thanks @Boscop)
+
 # Simple example
 
 `Cargo.toml`
@@ -48,7 +54,7 @@ serde_json
 [dependencies]
 serde-diff = "0.1.3"
 serde = "1"
-serde_json = "1" // all serde formats are supported, serde_json is shown in this example
+serde_json = "1" # all serde formats are supported, serde_json is shown in this example
 ```
 `main.rs`
 ```rust
@@ -83,6 +89,34 @@ fn main() {
         b: 4.,
     };
     assert_eq!(result, target);
+}
+```
+
+## Derive macro attributes
+Opaque structs:
+```rust
+#[derive(SerdeDiff, Serialize, Deserialize, PartialEq)]
+#[serde_diff(opaque)] // opaque structs are serialized as a unit and fields do not need to implement SerdeDiff
+struct DoesNotRecurse {
+    value: ExternalType, 
+}
+```
+
+Opaque fields:
+```rust
+#[derive(SerdeDiff, Serialize, Deserialize, PartialEq)]
+struct WrapperStruct {
+    #[serde_diff(opaque)]
+    value: ExternalType, // opaque fields only need to implement Serialize + Deserialize + PartialEq,
+}
+```
+
+Skip fields:
+```rust
+#[derive(SerdeDiff, Serialize, Deserialize, PartialEq)]
+struct WrapperStruct {
+    #[serde_diff(skip)]
+    value: ExternalType,
 }
 ```
 

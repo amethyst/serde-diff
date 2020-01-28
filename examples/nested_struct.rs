@@ -13,16 +13,16 @@ struct MySimpleStruct {
     val: u32,
 }
 
-// Example of a struct that does not implement SerdeDiff, but is still usable with `#[serde_diff(inline)]`
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-struct InlineTest(i32);
+// Example of a struct that does not implement SerdeDiff, but is still usable with `#[serde_diff(opaque)]`
+#[derive(SerdeDiff, Clone, Serialize, Deserialize, PartialEq, Debug)]
+#[serde_diff(opaque)]
+struct OpaqueTest(i32);
 
 // This struct is contained within MyStruct for a more complex example case
 #[derive(SerdeDiff, Clone, Serialize, Deserialize, Debug)]
 struct MyInnerStruct {
     x: f32,
-    #[serde_diff(inline)]
-    inline: InlineTest,
+    opaque: OpaqueTest,
     a_string: String,
     string_list: Vec<String>,
     string_list2: Vec<String>,
@@ -47,7 +47,7 @@ fn main() {
         s: "A string".to_string(),
         c: MyInnerStruct {
             x: 40.0,
-            inline: InlineTest(9),
+            opaque: OpaqueTest(9),
             a_string: "my string".to_string(),
             string_list: vec!["str1".to_string(), "str3".to_string()],
             string_list2: vec!["str6".to_string(), "str7".to_string()],
@@ -63,7 +63,7 @@ fn main() {
         s: "A string".to_string(),
         c: MyInnerStruct {
             x: 39.0,
-            inline: InlineTest(4),
+            opaque: OpaqueTest(4),
             a_string: "my other string".to_string(),
             string_list: vec!["str1".to_string(), "str2".to_string(), "str3".to_string()],
             string_list2: vec!["str6".to_string()],
@@ -89,7 +89,7 @@ fn main() {
         s: "A string".to_string(), // unchanged
         c: MyInnerStruct {
             x: 40.0,                                                    // old, 40.0 -> 39.0
-            inline: InlineTest(9),                                      // old, 9 -> 4
+            opaque: OpaqueTest(9),                                      // old, 9 -> 4
             a_string: "my string".to_string(), // old, "my string" -> "my other string"
             string_list: vec!["str1".to_string(), "str5".to_string()], // does not match old or new, "str2" was added
             string_list2: vec!["str6".to_string(), "str7".to_string()], // old, "str7" was removed

@@ -36,10 +36,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let add_hello = serde_json::to_string(&Diff::serializable(&empty, &hello_world))?;
     let hello_to_hi = serde_json::to_string(&Diff::serializable(&hello_world, &hi_world))?;
-    let add_planet =
-        serde_json::to_string(&Diff::serializable(&hi_world, &hi_world_and_planet))?;
-    let del_world =
-        serde_json::to_string(&Diff::serializable(&hi_world_and_planet, &hi_planet))?;
+    let add_planet = serde_json::to_string(&Diff::serializable(&hi_world, &hi_world_and_planet))?;
+    let del_world = serde_json::to_string(&Diff::serializable(&hi_world_and_planet, &hi_planet))?;
     let no_change = serde_json::to_string(&Diff::serializable(&hi_planet, &hi_planet))?;
 
     let mut built = TestStruct::default();

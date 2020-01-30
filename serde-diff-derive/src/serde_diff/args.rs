@@ -33,21 +33,22 @@ pub struct SerdeDiffFieldArgs {
 impl SerdeDiffFieldArgs {
     /// Name of the field
     pub fn ident(&self) -> &Option<syn::Ident> {
-        return &self.ident;
+        &self.ident
     }
 
     /// Type of the field
     pub fn ty(&self) -> &syn::Type {
-        return &self.ty;
+        &self.ty
     }
 
     /// If true, simple diff should be generated inline
     pub fn skip(&self) -> bool {
-        return self.skip;
+        self.skip
     }
 
     /// If true, this field should be ignored
+
     pub fn opaque(&self) -> bool {
-        return self.opaque;
+        self.opaque
     }
 }

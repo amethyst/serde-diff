@@ -525,7 +525,6 @@ struct DiffCommandDeserWrapper<'a, T> {
 // for DiffCommand::Value in order to support zero-copy deserialization of T.
 // This is achieved by passing &mut T through the DiffCommandDeserWrapper, which parses the enum
 // to the DeserWrapper which calls Deserialize::deserialize_in_place.
-#[allow(non_camel_case_types)]
 enum DiffCommandField {
     Enter,
     Value,
@@ -1293,7 +1292,6 @@ impl<T: SerdeDiff + Serialize + for<'a> Deserialize<'a>> SerdeDiff for Option<T>
     }
 }
 
-#[allow(dead_code)]
 type Unit = ();
 simple_serde_diff!(Unit);
 

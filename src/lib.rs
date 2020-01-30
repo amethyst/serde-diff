@@ -12,9 +12,9 @@ use serde::{
 pub use serde_diff_derive::SerdeDiff;
 use std::{
     borrow::Cow,
+    cell::Cell,
     collections::{BTreeMap, HashMap},
     hash::Hash,
-    cell::Cell
 };
 
 // NEXT STEPS:
@@ -192,7 +192,7 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
         &mut self,
         value: &DiffCommandRef<'b, T>,
         implicit_exit: bool,
-        is_change: bool
+        is_change: bool,
     ) -> Result<(), S::Error> {
         let element_stack = self.element_stack.as_mut().unwrap();
         if !element_stack.is_empty() {
@@ -828,7 +828,7 @@ impl<T: SerdeDiff + Serialize + for<'a> Deserialize<'a>> SerdeDiff for Vec<T> {
                     ctx.save_command::<()>(
                         &DiffCommandRef::Enter(DiffPathElementValue::AddToCollection),
                         false,
-                        true
+                        true,
                     )?;
                     ctx.save_command(&DiffCommandRef::Value(other_item), true, true)?;
                     need_exit = true;
@@ -922,7 +922,7 @@ macro_rules! array_impls {
                         ctx.pop_path_element()?;
                     }
                     if need_exit {
-                        ctx.save_command::<()>(&DiffCommandRef::Exit, true)?;
+                        ctx.save_command::<()>(&DiffCommandRef::Exit, true, false)?;
                     }
                     Ok(changed)
                 }
@@ -1214,15 +1214,16 @@ impl<T: SerdeDiff + Serialize + for<'a> Deserialize<'a>> SerdeDiff for Option<T>
                     while self_iter.next().is_some() {
                         num_to_remove += 1;
                     }
-                    ctx.save_command::<()>(&DiffCommandRef::Remove(num_to_remove), true)?;
+                    ctx.save_command::<()>(&DiffCommandRef::Remove(num_to_remove), true, true)?;
                     changed = true;
                 }
                 (None, Some(other_item)) => {
                     ctx.save_command::<()>(
                         &DiffCommandRef::Enter(DiffPathElementValue::AddToCollection),
                         false,
+                        true,
                     )?;
-                    ctx.save_command(&DiffCommandRef::Value(other_item), true)?;
+                    ctx.save_command(&DiffCommandRef::Value(other_item), true, true)?;
                     need_exit = true;
                     changed = true;
                 }
@@ -1238,7 +1239,7 @@ impl<T: SerdeDiff + Serialize + for<'a> Deserialize<'a>> SerdeDiff for Option<T>
             idx += 1;
         }
         if need_exit {
-            ctx.save_command::<()>(&DiffCommandRef::Exit, true)?;
+            ctx.save_command::<()>(&DiffCommandRef::Exit, true, false)?;
         }
         Ok(changed)
     }

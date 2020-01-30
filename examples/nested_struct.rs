@@ -39,7 +39,7 @@ struct MyStruct {
     simple: SimpleWrapper,
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create old state
     let old = MyStruct {
         a: 5.0,
@@ -78,9 +78,10 @@ fn main() {
     let diff = Diff::serializable(&old, &new);
 
     // Serialize into a couple different formats
-    let json_data = serde_json::to_string(&diff).unwrap();
-    let bincode_data = bincode::serialize(&diff).unwrap();
+    let json_data = serde_json::to_string(&diff)?;
+    let bincode_data = bincode::serialize(&diff)?;
 
+    println!("{}", &json_data);
     // Create a struct to which we will apply a diff. This is a mix of old and new state from
     // the diff
     let target = MyStruct {
@@ -102,15 +103,14 @@ fn main() {
     {
         let mut target = target.clone();
         let mut deserializer = serde_json::Deserializer::from_str(&json_data);
-        Apply::apply(&mut deserializer, &mut target).unwrap();
+        Apply::apply(&mut deserializer, &mut target)?;
     }
 
     // Demonstrate applying the diff saved as bincode
     {
         let mut target = target.clone();
-        bincode::config()
-            .deserialize_seed(Apply::deserializable(&mut target), &bincode_data)
-            .unwrap();
+        bincode::config().deserialize_seed(Apply::deserializable(&mut target), &bincode_data)?;
+
         println!("diff {:#?} and {:#?}", old, new);
         println!("result {:#?}", target);
     }
@@ -120,4 +120,5 @@ fn main() {
         bincode_data.len(),
         json_data.len()
     );
+    Ok(())
 }

@@ -80,6 +80,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Serialize into a couple different formats
     let json_data = serde_json::to_string(&diff)?;
     let bincode_data = bincode::serialize(&diff)?;
+    let msgpack_data = rmp_serde::to_vec_named(&diff)?;
 
     println!("{}", &json_data);
     // Create a struct to which we will apply a diff. This is a mix of old and new state from
@@ -116,9 +117,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!(
-        "bincode size {} json size {}",
+        "bincode size {} json size {} msgpack size {}",
         bincode_data.len(),
-        json_data.len()
+        json_data.len(),
+        msgpack_data.len(),
     );
     Ok(())
 }

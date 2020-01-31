@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
-use serde_diff::{simple_serde_diff, Apply, Diff, SerdeDiff};
+use serde_diff::{opaque_serde_diff, Apply, Diff, SerdeDiff};
 
 // Example of implementing diff support for trivial type. Must implement
 // Serialize + Deserialize + PartialEq.
 #[derive(PartialEq, Serialize, Deserialize, Clone, Debug)]
 struct SimpleWrapper(u32);
-simple_serde_diff!(SimpleWrapper);
+opaque_serde_diff!(SimpleWrapper);
 
 // Minimal example of implementing diff support for a struct
 #[derive(SerdeDiff, Serialize, Deserialize, Clone, Debug)]
@@ -13,7 +13,7 @@ struct MySimpleStruct {
     val: u32,
 }
 
-// Example of a struct that does not implement SerdeDiff, but is still usable with `#[serde_diff(opaque)]`
+// Example of an "opaque" implementation of SerdeDiff using `#[serde_diff(opaque)]`
 #[derive(SerdeDiff, Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde_diff(opaque)]
 struct OpaqueTest(i32);
@@ -111,6 +111,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let mut target = target.clone();
         bincode::config().deserialize_seed(Apply::deserializable(&mut target), &bincode_data)?;
+
+        println!("diff {:#?} and {:#?}", old, new);
+        println!("result {:#?}", target);
+    }
+
+    // Demonstrate applying the diff saved as msgpack
+    {
+        let mut target = target.clone();
+        let mut deserializer = rmp_serde::Deserializer::new(msgpack_data.as_slice());
+        Apply::apply(&mut deserializer, &mut target)?;
 
         println!("diff {:#?} and {:#?}", old, new);
         println!("result {:#?}", target);

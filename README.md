@@ -21,20 +21,25 @@ On a struct:
 #[derive(SerdeDiff, Serialize, Deserialize)]
 ```
 
-Serialize & apply differences:
+Serialize & apply differences for various formats:
 
-bincode
+rmp_serde (MessagePack - very small messages)
 ```rust
-let bincode_data = bincode::serialize(&Diff::serializable(&old, &new)).unwrap();
-bincode::config()
-        .deserialize_seed(Apply::deserializable(&mut target), &bincode_data)
-        .unwrap();
+let msgpack_data = rmp_serde::to_vec_named(&Diff::serializable(&old, &new))?;
+let mut deserializer = rmp_serde::Deserializer::new(msgpack_data.as_slice());
+Apply::apply(&mut deserializer, &mut target)?;
+```
+
+bincode (very fast serialize/deserialize) 
+```rust
+let bincode_data = bincode::serialize(&Diff::serializable(&old, &new))?;
+bincode::config().deserialize_seed(Apply::deserializable(&mut target), &bincode_data)?;
 ```
 serde_json
 ```rust
-        let json_data = serde_json::to_string(&Diff::serializable(&old, &new)).unwrap();
+        let json_data = serde_json::to_string(&Diff::serializable(&old, &new))?;
         let mut deserializer = serde_json::Deserializer::from_str(&json_data);
-        Apply::apply(&mut deserializer, &mut target).unwrap();
+        Apply::apply(&mut deserializer, &mut target)?;
 ```
 
 ## Built-in type support

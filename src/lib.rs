@@ -1,3 +1,11 @@
+#![warn(missing_docs)]
+//! A small helper that can
+//! 1. Serialize the fields that differ between two structs of the same type
+//! 2. Apply previously serialized field differences to other structs
+//!
+//! The SerdeDiff trait impl can serialize field paths recursively,
+//! greatly reducing the amount of data that needs to be serialized
+//! when only a small part of a struct has changed.
 #[cfg(test)]
 mod tests;
 
@@ -58,9 +66,12 @@ pub trait SerdeDiff {
         A: de::SeqAccess<'de>;
 }
 
+/// Configures how to serialize field identifiers
 #[derive(Copy, Clone)]
 pub enum FieldPathMode {
+    /// Use the field's string name as its identifier
     Name,
+    /// Use the field's index in the struct as its identifier
     Index,
 }
 enum ElementStackEntry<'a, S: SerializeSeq> {
@@ -105,6 +116,7 @@ impl<'a, S: SerializeSeq> Drop for DiffContext<'a, S> {
     }
 }
 
+#[doc(hidden)]
 impl<'a, S: SerializeSeq> DiffContext<'a, S> {
     /// Mode for serializing field paths
     pub fn field_path_mode(&self) -> FieldPathMode {
@@ -250,9 +262,105 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
     }
 }
 
+/// Configures creation of `Apply` and `Diff`
+///
+/// # Examples
+///
+/// ```rust
+/// use serde_diff::{SerdeDiff, Config, FieldPathMode};
+/// use serde::{Serialize, Deserialize};
+/// #[derive(SerdeDiff, Serialize, Deserialize, PartialEq)]
+/// struct Test {
+///     a: i32,
+/// }
+/// let diff = Config::new()
+///     .with_field_path_mode(FieldPathMode::Index)
+///     .serializable_diff(&Test { a: 3 }, &Test { a: 5 });
+/// ```
+pub struct Config {
+    field_path_mode: FieldPathMode,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            field_path_mode: FieldPathMode::Name,
+        }
+    }
+}
+
+impl Config {
+    /// Creates a `Config` with default values
+    pub fn new() -> Self {
+        <Self as Default>::default()
+    }
+
+    /// Sets the `FieldPathMode` to use when serializing a Diff
+    pub fn with_field_path_mode(mut self, mode: FieldPathMode) -> Self {
+        self.field_path_mode = mode;
+        self
+    }
+
+    /// Create a serializable Diff, which when serialized will write the differences between the old
+    /// and new value into the serializer in the form of a sequence of diff commands
+    pub fn serializable_diff<'a, 'b, T: SerdeDiff + 'a + 'b>(
+        self,
+        old: &'a T,
+        new: &'b T,
+    ) -> Diff<'a, 'b, T> {
+        Diff {
+            old,
+            new,
+            field_path_mode: self.field_path_mode,
+            has_changes: Cell::new(false),
+        }
+    }
+
+    /// Writes the differences between the old and new value into the given serializer in the form
+    /// of a sequence of diff commands
+    pub fn diff<'a, 'b, S: Serializer, T: SerdeDiff + 'a + 'b>(
+        self,
+        serializer: S,
+        old: &'a T,
+        new: &'b T,
+    ) -> Result<S::Ok, S::Error> {
+        self.serializable_diff(old, new).serialize(serializer)
+    }
+
+    /// Create a deserializable Apply, where the given target will be changed when the resulting
+    /// Apply struct is deserialized
+    pub fn deserializable_apply<'a, T: SerdeDiff>(self, target: &'a mut T) -> Apply<'a, T> {
+        Apply { target }
+    }
+
+    /// Applies a sequence of diff commands to the target, as read by the deserializer
+    pub fn apply<'de, D, T: SerdeDiff>(
+        self,
+        deserializer: D,
+        target: &mut T,
+    ) -> Result<(), <D as de::Deserializer<'de>>::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        deserializer.deserialize_seq(self.deserializable_apply(target))
+    }
+}
+
 /// A serializable structure that will produce a sequence of diff commands when serialized.
-/// You could create this struct and pass it to a serializer, or use the convenience method diff
-/// to pass your serializer along with old/new values to generate the diff from
+/// You can pass this to a serializer, or use the convenience method `diff`
+/// to pass your serializer along with old/new values to use when serializing the diff.
+///
+/// # Examples
+///
+/// ```rust
+/// use serde_diff::{SerdeDiff, Diff};
+/// use serde::{Serialize, Deserialize};
+/// #[derive(SerdeDiff, Serialize, Deserialize, PartialEq)]
+/// struct Test {
+///     a: i32,
+/// }
+/// let diff = Diff::serializable(&Test { a: 3 }, &Test { a: 5 });
+/// ```
 pub struct Diff<'a, 'b, T> {
     old: &'a T,
     new: &'b T,
@@ -266,30 +374,13 @@ impl<'a, 'b, T: SerdeDiff + 'a + 'b> Diff<'a, 'b, T> {
     /// Create a serializable Diff, which when serialized will write the differences between the old
     /// and new value into the serializer in the form of a sequence of diff commands
     pub fn serializable(old: &'a T, new: &'b T) -> Self {
-        Self {
-            old,
-            new,
-            field_path_mode: FieldPathMode::Name,
-            has_changes: Cell::new(false),
-        }
-    }
-
-    /// Create a serializable Diff, which when serialized will write the differences between the old
-    /// and new value into the serializer in the form of a sequence of diff commands
-    /// `field_path_mode` specifies how field paths should be serialized.
-    pub fn serializable_with_mode(old: &'a T, new: &'b T, field_path_mode: FieldPathMode) -> Self {
-        Self {
-            old,
-            new,
-            field_path_mode,
-            has_changes: Cell::new(false),
-        }
+        Config::default().serializable_diff(old, new)
     }
 
     /// Writes the differences between the old and new value into the given serializer in the form
     /// of a sequence of diff commands
     pub fn diff<S: Serializer>(serializer: S, old: &'a T, new: &'b T) -> Result<S::Ok, S::Error> {
-        Self::serializable(old, new).serialize(serializer)
+        Config::default().diff(serializer, old, new)
     }
 
     /// True if a change was detected during the diff
@@ -353,6 +444,22 @@ impl<'a, 'b, T: SerdeDiff> Serialize for Diff<'a, 'b, T> {
 }
 
 /// A deserializable structure that will apply a sequence of diff commands to the target
+///
+/// # Examples
+///
+/// ```rust
+/// use serde_diff::{SerdeDiff, Diff, Apply};
+/// use serde::{Serialize, Deserialize};
+/// #[derive(SerdeDiff, Serialize, Deserialize, PartialEq)]
+/// struct Test {
+///     a: i32,
+/// }
+/// let diff = Diff::serializable(&Test { a: 3 }, &Test { a: 5 });
+/// let msgpack_data = rmp_serde::to_vec_named(&diff).expect("failed to serialize diff");
+/// let mut deserializer = rmp_serde::Deserializer::new(msgpack_data.as_slice());
+/// let mut target = Test { a: 4 };
+/// Apply::apply(&mut deserializer, &mut target).expect("failed when deserializing diff");
+/// ```
 pub struct Apply<'a, T: SerdeDiff> {
     target: &'a mut T,
 }
@@ -360,7 +467,7 @@ impl<'a, 'de, T: SerdeDiff> Apply<'a, T> {
     /// Create a deserializable apply, where the given target will be changed when the resulting
     /// Apply struct is deserialized
     pub fn deserializable(target: &'a mut T) -> Self {
-        Self { target }
+        Config::default().deserializable_apply(target)
     }
 
     /// Applies a sequence of diff commands to the target, as read by the deserializer
@@ -371,7 +478,7 @@ impl<'a, 'de, T: SerdeDiff> Apply<'a, T> {
     where
         D: de::Deserializer<'de>,
     {
-        deserializer.deserialize_seq(Apply { target })
+        Config::default().apply(deserializer, target)
     }
 }
 impl<'a, 'de, T: SerdeDiff> de::DeserializeSeed<'de> for Apply<'a, T> {
@@ -1127,7 +1234,7 @@ map_serde_diff!(BTreeMap<K, V>, Ord);
 /// This makes the type a "terminal" type in the SerdeDiff hierarchy, meaning deeper inspection
 /// will not be possible. Use the SerdeDiff derive macro for recursive field inspection.
 #[macro_export]
-macro_rules! simple_serde_diff {
+macro_rules! opaque_serde_diff {
     ($t:ty) => {
         impl SerdeDiff for $t {
             fn diff<'a, S: serde_diff::_serde::ser::SerializeSeq>(
@@ -1158,39 +1265,39 @@ macro_rules! simple_serde_diff {
 }
 
 // Implement `SerdeDiff` for primitive types and types defined in the standard library.
-simple_serde_diff!(bool);
-simple_serde_diff!(isize);
-simple_serde_diff!(i8);
-simple_serde_diff!(i16);
-simple_serde_diff!(i32);
-simple_serde_diff!(i64);
-simple_serde_diff!(usize);
-simple_serde_diff!(u8);
-simple_serde_diff!(u16);
-simple_serde_diff!(u32);
-simple_serde_diff!(u64);
-simple_serde_diff!(i128);
-simple_serde_diff!(u128);
-simple_serde_diff!(f32);
-simple_serde_diff!(f64);
-simple_serde_diff!(char);
-simple_serde_diff!(String);
-simple_serde_diff!(std::ffi::CString);
+opaque_serde_diff!(bool);
+opaque_serde_diff!(isize);
+opaque_serde_diff!(i8);
+opaque_serde_diff!(i16);
+opaque_serde_diff!(i32);
+opaque_serde_diff!(i64);
+opaque_serde_diff!(usize);
+opaque_serde_diff!(u8);
+opaque_serde_diff!(u16);
+opaque_serde_diff!(u32);
+opaque_serde_diff!(u64);
+opaque_serde_diff!(i128);
+opaque_serde_diff!(u128);
+opaque_serde_diff!(f32);
+opaque_serde_diff!(f64);
+opaque_serde_diff!(char);
+opaque_serde_diff!(String);
+opaque_serde_diff!(std::ffi::CString);
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-simple_serde_diff!(std::ffi::OsString);
-simple_serde_diff!(std::num::NonZeroU8);
-simple_serde_diff!(std::num::NonZeroU16);
-simple_serde_diff!(std::num::NonZeroU32);
-simple_serde_diff!(std::num::NonZeroU64);
-simple_serde_diff!(std::time::Duration);
-simple_serde_diff!(std::time::SystemTime);
-simple_serde_diff!(std::net::IpAddr);
-simple_serde_diff!(std::net::Ipv4Addr);
-simple_serde_diff!(std::net::Ipv6Addr);
-simple_serde_diff!(std::net::SocketAddr);
-simple_serde_diff!(std::net::SocketAddrV4);
-simple_serde_diff!(std::net::SocketAddrV6);
-simple_serde_diff!(std::path::PathBuf);
+opaque_serde_diff!(std::ffi::OsString);
+opaque_serde_diff!(std::num::NonZeroU8);
+opaque_serde_diff!(std::num::NonZeroU16);
+opaque_serde_diff!(std::num::NonZeroU32);
+opaque_serde_diff!(std::num::NonZeroU64);
+opaque_serde_diff!(std::time::Duration);
+opaque_serde_diff!(std::time::SystemTime);
+opaque_serde_diff!(std::net::IpAddr);
+opaque_serde_diff!(std::net::Ipv4Addr);
+opaque_serde_diff!(std::net::Ipv6Addr);
+opaque_serde_diff!(std::net::SocketAddr);
+opaque_serde_diff!(std::net::SocketAddrV4);
+opaque_serde_diff!(std::net::SocketAddrV6);
+opaque_serde_diff!(std::path::PathBuf);
 
 impl<T: SerdeDiff + Serialize + for<'a> Deserialize<'a>> SerdeDiff for Option<T> {
     fn diff<'a, S: SerializeSeq>(
@@ -1293,7 +1400,7 @@ impl<T: SerdeDiff + Serialize + for<'a> Deserialize<'a>> SerdeDiff for Option<T>
 }
 
 type Unit = ();
-simple_serde_diff!(Unit);
+opaque_serde_diff!(Unit);
 
 /// This is a serializer that counts the elements in a sequence
 struct CountingSerializer {

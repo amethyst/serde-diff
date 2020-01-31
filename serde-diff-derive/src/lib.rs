@@ -8,7 +8,7 @@ mod serde_diff;
 /// ```rust
 /// use serde_diff::SerdeDiff;
 /// use serde::{Serialize, Deserialize};
-/// #[derive(SerdeDiff, Serialize, Deserialize)]
+/// #[derive(SerdeDiff)]
 /// struct MySimpleStruct {
 ///    val: u32,
 /// }
@@ -28,7 +28,7 @@ mod serde_diff;
 /// ```rust
 /// use serde_diff::SerdeDiff;
 /// use serde::{Serialize, Deserialize};
-/// #[derive(SerdeDiff, Clone, Serialize, Deserialize, Debug)]
+/// #[derive(SerdeDiff)]
 /// struct MyInnerStruct {
 ///     #[serde_diff(opaque)]
 ///     heap: std::collections::HashSet<i32>,

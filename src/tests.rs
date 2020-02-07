@@ -1,5 +1,8 @@
-use super::*;
+use crate::{Apply, Diff, SerdeDiff};
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
+
+use crate::serde_diff;
 
 #[derive(SerdeDiff, Serialize, Deserialize, PartialEq, Debug, Copy, Clone)]
 struct TestStruct {

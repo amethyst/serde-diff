@@ -10,18 +10,18 @@
 #[cfg(test)]
 mod tests;
 
+use crate as serde_diff;
 #[doc(hidden)]
 pub use serde as _serde;
-
-pub use crate as serde_diff;
-
 use serde::{de, ser::SerializeSeq};
 pub use serde_diff_derive::SerdeDiff;
 
-pub mod apply;
+#[doc(hidden)]
+pub(crate) mod apply;
 pub(crate) mod config;
 pub(crate) mod counting_serializer;
-pub mod difference;
+#[doc(hidden)]
+pub(crate) mod difference;
 pub(crate) mod implementation;
 
 pub use apply::Apply;

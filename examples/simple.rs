@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_diff::{Apply, Diff, SerdeDiff};
+
 #[derive(SerdeDiff, Serialize, Deserialize, PartialEq, Debug)]
 struct TestStruct {
     a: u32,

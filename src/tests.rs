@@ -1,4 +1,6 @@
-use super::*;
+use crate as serde_diff;
+use crate::{Apply, Diff, SerdeDiff};
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
 #[derive(SerdeDiff, Serialize, Deserialize, PartialEq, Debug, Copy, Clone)]

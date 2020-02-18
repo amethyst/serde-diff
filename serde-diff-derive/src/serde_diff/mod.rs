@@ -116,7 +116,7 @@ fn generate(
 
     // Generate the SerdeDiff::diff function for the type
     let diff_fn = quote! {
-        fn diff<'a, S: serde_diff::_serde::ser::SerializeSeq>(&self, ctx: &mut serde_diff::DiffContext<'a, S>, other: &Self) -> Result<bool, S::Error> {
+        fn diff<'a, S: serde_diff::_serde::ser::SerializeSeq>(&self, ctx: &mut serde_diff::difference::DiffContext<'a, S>, other: &Self) -> Result<bool, S::Error> {
             let mut __changed__ = false;
             #(#diff_fn_field_handlers)*
             Ok(__changed__)
@@ -138,13 +138,13 @@ fn generate(
 
         if pf.field_args.opaque() {
             apply_fn_field_handlers.push(quote!(
-                serde_diff::DiffPathElementValue::FieldIndex(#field_idx) => __changed__ |= ctx.read_value(seq, &mut self.#ident)?,
-                serde_diff::DiffPathElementValue::Field(field_path) if field_path.as_ref() == #ident_as_str => __changed__ |= ctx.read_value(seq, &mut self.#ident)?,
+                serde_diff::difference::DiffPathElementValue::FieldIndex(#field_idx) => __changed__ |= ctx.read_value(seq, &mut self.#ident)?,
+                serde_diff::difference::DiffPathElementValue::Field(field_path) if field_path.as_ref() == #ident_as_str => __changed__ |= ctx.read_value(seq, &mut self.#ident)?,
             ));
         } else {
             apply_fn_field_handlers.push(quote!(
-                serde_diff::DiffPathElementValue::FieldIndex(#field_idx) => __changed__ |= <#ty as serde_diff::SerdeDiff>::apply(&mut self.#ident, seq, ctx)?,
-                serde_diff::DiffPathElementValue::Field(field_path) if field_path.as_ref() == #ident_as_str => __changed__ |= <#ty as serde_diff::SerdeDiff>::apply(&mut self.#ident, seq, ctx)?,
+                serde_diff::difference::DiffPathElementValue::FieldIndex(#field_idx) => __changed__ |= <#ty as serde_diff::SerdeDiff>::apply(&mut self.#ident, seq, ctx)?,
+                serde_diff::difference::DiffPathElementValue::Field(field_path) if field_path.as_ref() == #ident_as_str => __changed__ |= <#ty as serde_diff::SerdeDiff>::apply(&mut self.#ident, seq, ctx)?,
             ));
         }
     }
@@ -156,7 +156,7 @@ fn generate(
         fn apply<'de, A>(
             &mut self,
             seq: &mut A,
-            ctx: &mut serde_diff::ApplyContext,
+            ctx: &mut serde_diff::apply::ApplyContext,
         ) -> Result<bool, <A as serde_diff::_serde::de::SeqAccess<'de>>::Error>
         where
             A: serde_diff::_serde::de::SeqAccess<'de>, {
@@ -191,8 +191,8 @@ fn generate_opaque(
 ) -> proc_macro::TokenStream {
     let struct_name = &struct_args.ident;
     let diff_impl = quote! {
-        impl SerdeDiff for #struct_name {
-            fn diff<'a, S: serde_diff::_serde::ser::SerializeSeq>(&self, ctx: &mut serde_diff::DiffContext<'a, S>, other: &Self) -> Result<bool, S::Error> {
+        impl serde_diff::SerdeDiff for #struct_name {
+            fn diff<'a, S: serde_diff::_serde::ser::SerializeSeq>(&self, ctx: &mut serde_diff::difference::DiffContext<'a, S>, other: &Self) -> Result<bool, S::Error> {
                 if self != other {
                     ctx.save_value(other)?;
                     Ok(true)
@@ -203,7 +203,7 @@ fn generate_opaque(
             fn apply<'de, A>(
                 &mut self,
                 seq: &mut A,
-                ctx: &mut serde_diff::ApplyContext,
+                ctx: &mut serde_diff::apply::ApplyContext,
             ) -> Result<bool, <A as serde_diff::_serde::de::SeqAccess<'de>>::Error>
             where
                 A: serde_diff::_serde::de::SeqAccess<'de>, {

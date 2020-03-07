@@ -5,6 +5,9 @@ rust:
   - nightly
 script:
   - cargo build --verbose --all
+  - cargo run --example nested_struct
+  - cargo run --example simple
+  - cargo run --example map
 os:
   - windows
   - osx

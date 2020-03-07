@@ -80,7 +80,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Serialize into a couple different formats
     let json_data = serde_json::to_string(&diff)?;
     let bincode_data = bincode::serialize(&diff)?;
-    let msgpack_data = rmp_serde::to_vec_named(&diff)?;
+    // Waiting on a fix to https://github.com/3Hren/msgpack-rust/issues/235
+    // let msgpack_data = rmp_serde::to_vec_named(&diff)?;
 
     println!("{}", &json_data);
     // Create a struct to which we will apply a diff. This is a mix of old and new state from
@@ -117,20 +118,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Demonstrate applying the diff saved as msgpack
-    {
-        let mut target = target.clone();
-        let mut deserializer = rmp_serde::Deserializer::new(msgpack_data.as_slice());
-        Apply::apply(&mut deserializer, &mut target)?;
+    // Waiting on a fix to https://github.com/3Hren/msgpack-rust/issues/235
+    // {
+    //     let mut target = target.clone();
+    //     let mut deserializer = rmp_serde::Deserializer::new(msgpack_data.as_slice());
+    //     Apply::apply(&mut deserializer, &mut target)?;
 
-        println!("diff {:#?} and {:#?}", old, new);
-        println!("result {:#?}", target);
-    }
+    //     println!("diff {:#?} and {:#?}", old, new);
+    //     println!("result {:#?}", target);
+    // }
 
     println!(
         "bincode size {} json size {} msgpack size {}",
         bincode_data.len(),
         json_data.len(),
-        msgpack_data.len(),
+        0,
+        // msgpack_data.len(),
     );
     Ok(())
 }

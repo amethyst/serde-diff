@@ -246,7 +246,7 @@ macro_rules! opaque_serde_diff {
         impl SerdeDiff for $t {
             fn diff<'a, S: $crate::_serde::ser::SerializeSeq>(
                 &self,
-                ctx: &mut $crate::difference::DiffContext<'a, S>,
+                ctx: &mut $crate::DiffContext<'a, S>,
                 other: &Self,
             ) -> Result<bool, S::Error> {
                 if self != other {
@@ -260,7 +260,7 @@ macro_rules! opaque_serde_diff {
             fn apply<'de, A>(
                 &mut self,
                 seq: &mut A,
-                ctx: &mut $crate::apply::ApplyContext,
+                ctx: &mut $crate::ApplyContext,
             ) -> Result<bool, <A as $crate::_serde::de::SeqAccess<'de>>::Error>
             where
                 A: $crate::_serde::de::SeqAccess<'de>,

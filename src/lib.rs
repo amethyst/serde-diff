@@ -10,7 +10,6 @@
 #[cfg(test)]
 mod tests;
 
-use crate as serde_diff;
 #[doc(hidden)]
 pub use serde as _serde;
 use serde::{de, ser::SerializeSeq};
@@ -29,9 +28,9 @@ pub use config::Config;
 pub use difference::Diff;
 
 // Used by the proc_macro
-pub use difference::DiffPathElementValue;
-pub use difference::DiffContext;
 pub use apply::ApplyContext;
+pub use difference::DiffContext;
+pub use difference::DiffPathElementValue;
 
 // NEXT STEPS:
 // - Decouple from serde_json as much as possible. We might need to use a "stream" format with

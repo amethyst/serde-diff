@@ -192,7 +192,7 @@ fn generate_opaque(
     let struct_name = &struct_args.ident;
     let diff_impl = quote! {
         impl serde_diff::SerdeDiff for #struct_name {
-            fn diff<'a, S: serde_diff::_serde::ser::SerializeSeq>(&self, ctx: &mut serde_diff::difference::DiffContext<'a, S>, other: &Self) -> Result<bool, S::Error> {
+            fn diff<'a, S: serde_diff::_serde::ser::SerializeSeq>(&self, ctx: &mut serde_diff::DiffContext<'a, S>, other: &Self) -> Result<bool, S::Error> {
                 if self != other {
                     ctx.save_value(other)?;
                     Ok(true)

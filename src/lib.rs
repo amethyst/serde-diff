@@ -28,6 +28,11 @@ pub use apply::Apply;
 pub use config::Config;
 pub use difference::Diff;
 
+// Used by the proc_macro
+pub use difference::DiffPathElementValue;
+pub use difference::DiffContext;
+pub use apply::ApplyContext;
+
 // NEXT STEPS:
 // - Decouple from serde_json as much as possible. We might need to use a "stream" format with
 //   well-defined data order to be able to use serde Deserializer trait. DONE

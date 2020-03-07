@@ -1,6 +1,6 @@
 [package]
 name = "serde-diff-derive"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Karl Bergström <karl.anton.bergstrom@gmail.com>", "Philip Degarmo <aclysma@gmail.com>"]
 readme = "README.md"
 license = "Apache-2.0 OR MIT"

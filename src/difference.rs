@@ -67,6 +67,22 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
             )));
     }
 
+    pub fn push_variant(&mut self, variant_name: &'static str) {
+        self.element_stack
+            .as_mut()
+            .unwrap()
+            .push(ElementStackEntry::PathElement(DiffPathElementValue::EnumVariant(
+                Cow::Borrowed(variant_name),
+            )));
+    }
+
+    pub fn push_full_variant(&mut self) {
+        self.element_stack
+            .as_mut()
+            .unwrap()
+            .push(ElementStackEntry::PathElement(DiffPathElementValue::FullEnumVariant));
+    }
+
     /// Called when we visit a field. If the structure is recursive (i.e. struct within struct,
     /// elements within an array) this may be called more than once before a corresponding pop_path_element
     /// is called. See `pop_path_element`
@@ -582,6 +598,8 @@ pub enum DiffPathElementValue<'a> {
     #[serde(borrow)]
     Field(Cow<'a, str>),
     FieldIndex(u16),
+    EnumVariant(Cow<'a, str>),
+    FullEnumVariant,
     CollectionIndex(usize),
     AddToCollection,
 }

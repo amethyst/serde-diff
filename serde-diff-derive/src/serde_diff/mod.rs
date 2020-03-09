@@ -18,7 +18,7 @@ pub fn macro_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
                  generate_opaque(&input, struct_args)
              } else {
                  // Go ahead and generate the code                 
-                 match generate_enum(&input, struct_args) {
+                 match generate(&input, struct_args) {
                      //Ok(v) => {eprintln!("{}", v); v},
                      Ok(v) => v,
                      Err(v) => v,
@@ -30,7 +30,7 @@ pub fn macro_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
                  generate_opaque(&input, struct_args)
              } else {
                  // Go ahead and generate the code                 
-                 match generate_enum(&input, struct_args) {
+                 match generate(&input, struct_args) {
                      //Ok(v) => {eprintln!("{}", v); v},
                      Ok(v) => v,
                      Err(v) => v,
@@ -63,7 +63,7 @@ struct ParsedField {
     field_args: args::SerdeDiffFieldArgs,
 }
 
-fn generate_enum_fields_diff(
+fn generate_fields_diff(
     parsed_fields: &[ParsedField],
     matching : bool,
 ) -> proc_macro2::TokenStream {
@@ -183,7 +183,7 @@ fn generate_arms(name: &syn::Ident, variant: Option<&syn::Ident>, fields: &syn::
     let mut diff_match_arms = vec![];
     let mut apply_match_arms = vec![];
     let parsed_fields = ok_fields(&fields)?;
-    let diffs = generate_enum_fields_diff(
+    let diffs = generate_fields_diff(
         &parsed_fields,
         matching,
     );                    
@@ -292,7 +292,7 @@ fn generate_arms(name: &syn::Ident, variant: Option<&syn::Ident>, fields: &syn::
     Ok((diff_match_arms, apply_match_arms))
 }
 
-fn generate_enum(
+fn generate(
     input: &syn::DeriveInput,
     struct_args: args::SerdeDiffStructArgs,
 ) -> Result<proc_macro::TokenStream, proc_macro::TokenStream> {
@@ -379,8 +379,10 @@ fn generate_enum(
 
     // Generate the impl block with the diff and apply functions within it
     let struct_name = &struct_args.ident;
+    let generics = &struct_args.generics.params;
+    let where_clause =  &struct_args.generics.where_clause;
     let diff_impl = quote! {
-        impl serde_diff::SerdeDiff for #struct_name {
+        impl <#generics> serde_diff::SerdeDiff for #struct_name < #generics> #where_clause {
             #diff_fn
             #apply_fn
         }

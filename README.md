@@ -1,10 +1,10 @@
 # serde-diff
 
 A small helper that can
-1. Serialize the fields that differ between two structs of the same type 
-2. Apply previously serialized field differences to other structs.
+1. Serialize the fields that differ between two values of the same type 
+2. Apply previously serialized field differences to other values of the same type.
 
-The SerdeDiff trait impl can serialize field paths recursively, greatly reducing the amount of data that needs to be serialized when only a small part of a struct has changed. 
+The SerdeDiff trait impl can serialize field paths recursively, greatly reducing the amount of data that needs to be serialized when only a small part of a struct/enum has changed. 
 
 [![Build Status][build_img]][build_lnk] [![Crates.io][crates_img]][crates_lnk] [![Docs.rs][doc_img]][doc_lnk]
 
@@ -16,7 +16,7 @@ The SerdeDiff trait impl can serialize field paths recursively, greatly reducing
 [doc_lnk]: https://docs.rs/serde-diff
 
 ## Usage
-On a struct:
+On a struct or enum:
 ```rust
 #[derive(SerdeDiff, Serialize, Deserialize)]
 ```
@@ -123,6 +123,27 @@ Skip fields:
 struct WrapperStruct {
     #[serde_diff(skip)]
     value: ExternalType,
+}
+```
+
+Generics:
+```rust
+#[derive(SerdeDiff, Serialize, Deserialize, PartialEq, Debug)]
+struct GenericStruct<T>
+where
+    T: SerdeDiff,
+{
+    a: T,
+}
+```
+
+Enums:
+```rust
+#[derive(SerdeDiff, Serialize, Deserialize, PartialEq, Debug)]
+enum TestEnum {
+    Structish { x: u32, y: u32 },
+    Enumish(i32, i32, i32),
+    Unitish,
 }
 ```
 

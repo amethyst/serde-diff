@@ -15,6 +15,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let mut target = TestStruct { a: 0, b: 4. };
     let json_data = serde_json::to_string(&Diff::serializable(&old, &new))?;
+    println!("{}", json_data);
     let mut deserializer = serde_json::Deserializer::from_str(&json_data);
     Apply::apply(&mut deserializer, &mut target)?;
 

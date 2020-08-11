@@ -9,6 +9,8 @@ pub struct SerdeDiffStructArgs {
     /// Whether the struct is opaque or not
     #[darling(default)]
     pub opaque: bool,
+
+    pub generics: syn::Generics,
 }
 
 /// Metadata from the struct's field annotations

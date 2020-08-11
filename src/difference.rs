@@ -71,16 +71,18 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
         self.element_stack
             .as_mut()
             .unwrap()
-            .push(ElementStackEntry::PathElement(DiffPathElementValue::EnumVariant(
-                Cow::Borrowed(variant_name),
-            )));
+            .push(ElementStackEntry::PathElement(
+                DiffPathElementValue::EnumVariant(Cow::Borrowed(variant_name)),
+            ));
     }
 
     pub fn push_full_variant(&mut self) {
         self.element_stack
             .as_mut()
             .unwrap()
-            .push(ElementStackEntry::PathElement(DiffPathElementValue::FullEnumVariant));
+            .push(ElementStackEntry::PathElement(
+                DiffPathElementValue::FullEnumVariant,
+            ));
     }
 
     /// Called when we visit a field. If the structure is recursive (i.e. struct within struct,

@@ -13,7 +13,8 @@ struct Test3Struct;
 
 #[derive(SerdeDiff, Serialize, Deserialize, PartialEq, Debug)]
 struct Test4Struct<T>
-where T: SerdeDiff
+where
+    T: SerdeDiff,
 {
     a: T,
 }
@@ -34,18 +35,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(result, target);
     }
     {
-        let old = Test2Struct (1, 2, 3);
-        let new = Test2Struct (
+        let old = Test2Struct(1, 2, 3);
+        let new = Test2Struct(
             5, // Differs from old.0, will be serialized
-            2,
-            3
+            2, 3,
         );
-        let mut target = Test2Struct (4,5,6);
+        let mut target = Test2Struct(4, 5, 6);
         let json_data = serde_json::to_string(&Diff::serializable(&old, &new))?;
         let mut deserializer = serde_json::Deserializer::from_str(&json_data);
         Apply::apply(&mut deserializer, &mut target)?;
 
-        let result = Test2Struct ( 5,5,6 );
+        let result = Test2Struct(5, 5, 6);
         assert_eq!(result, target);
     }
     {
@@ -60,14 +60,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(result, target);
     }
     {
-        let old = Test4Struct { a: 5};
-        let new = Test4Struct { a: 7};
-        let mut target = Test4Struct { a: 10};
+        let old = Test4Struct { a: 5 };
+        let new = Test4Struct { a: 7 };
+        let mut target = Test4Struct { a: 10 };
         let json_data = serde_json::to_string(&Diff::serializable(&old, &new))?;
         let mut deserializer = serde_json::Deserializer::from_str(&json_data);
         Apply::apply(&mut deserializer, &mut target)?;
 
-        let result = Test4Struct { a: 7};
+        let result = Test4Struct { a: 7 };
         assert_eq!(result, target);
     }
     Ok(())

@@ -19,7 +19,6 @@ pub fn macro_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
              } else {
                  // Go ahead and generate the code                 
                  match generate(&input, struct_args) {
-                     //Ok(v) => {eprintln!("{}", v); v},
                      Ok(v) => v,
                      Err(v) => v,
                  }
@@ -31,7 +30,6 @@ pub fn macro_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
              } else {
                  // Go ahead and generate the code                 
                  match generate(&input, struct_args) {
-                     //Ok(v) => {eprintln!("{}", v); v},
                      Ok(v) => v,
                      Err(v) => v,
                  }
@@ -270,7 +268,7 @@ fn generate_arms(name: &syn::Ident, variant: Option<&syn::Ident>, fields: &syn::
                     while let Some(element) = ctx.next_path_element(seq)? {
                         match element {
                             #(#apply_fn_field_handlers)* 
-                        _ =>  ctx.skip_value(seq)?
+                            _ =>  ctx.skip_value(seq)?
                         }
                     }
                 }

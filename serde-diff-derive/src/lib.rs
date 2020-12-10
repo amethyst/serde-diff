@@ -34,6 +34,44 @@ mod serde_diff;
 ///     heap: std::collections::HashSet<i32>,
 /// }
 /// ```
+///
+/// Example of diffing a target struct `MySimpleStruct` that is being used for serialization instead
+/// of the struct `MyComplexStruct` itself. Useful for cases where derived data is present at
+/// runtime, but not wanted in the serialized form.
+/// ```rust
+/// use serde_diff::SerdeDiff;
+/// use serde::{Serialize, Deserialize};
+/// #[derive(SerdeDiff, Serialize, Deserialize, Clone)]
+/// #[serde(from = "MySimpleStruct", into = "MySimpleStruct")]
+/// #[serde_diff(target = "MySimpleStruct")]
+/// struct MyComplexStruct {
+///    val: u32,
+///    derived_val: String,
+/// }
+///
+/// #[derive(SerdeDiff, Serialize, Deserialize, Default)]
+/// #[serde(rename = "MyComplexStruct", default)]
+/// struct MySimpleStruct {
+///    val: u32,
+/// }
+///
+/// impl From<MySimpleStruct> for MyComplexStruct {
+///    fn from(my_simple_struct: MySimpleStruct) -> Self {
+///        MyComplexStruct {
+///            val: my_simple_struct.val,
+///            derived_val: my_simple_struct.val.to_string(),
+///        }
+///    }
+/// }
+///
+/// impl Into<MySimpleStruct> for MyComplexStruct {
+///     fn into(self) -> MySimpleStruct {
+///         MySimpleStruct {
+///             val: self.val,
+///         }
+///     }
+/// }
+/// ```
 #[proc_macro_derive(SerdeDiff, attributes(serde_diff))]
 pub fn serde_diff_macro_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     serde_diff::macro_derive(input)

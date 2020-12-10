@@ -9,6 +9,9 @@ pub struct SerdeDiffStructArgs {
     /// Whether the struct is opaque or not
     #[darling(default)]
     pub opaque: bool,
+    /// If specified, the struct we will convert to before performing diff operations
+    #[darling(default)]
+    pub target: Option<String>,
 
     pub generics: syn::Generics,
 }

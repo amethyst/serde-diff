@@ -22,6 +22,7 @@ fn roundtrip<T: SerdeDiff + Serialize + for<'a> Deserialize<'a> + PartialEq + De
 
     let bincode_diff = bincode::serialize(&diff).unwrap();
     let mut target = old;
+
     bincode::config()
         .deserialize_seed(Apply::deserializable(&mut target), &bincode_diff)
         .unwrap();
@@ -132,4 +133,63 @@ fn test_tuple() {
             None,
         ),
     );
+}
+
+#[derive(SerdeDiff, Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[serde(from = "MySimpleStruct", into = "MySimpleStruct")]
+#[serde_diff(target = "MySimpleStruct")]
+struct MyComplexStruct {
+    val: u32,
+    derived_val: String,
+}
+
+#[derive(SerdeDiff, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename = "MyComplexStruct", default)]
+struct MySimpleStruct {
+    val: u32,
+}
+
+impl From<MySimpleStruct> for MyComplexStruct {
+    fn from(my_simple_struct: MySimpleStruct) -> Self {
+        MyComplexStruct {
+            val: my_simple_struct.val,
+            derived_val: my_simple_struct.val.to_string(),
+        }
+    }
+}
+
+impl Into<MySimpleStruct> for MyComplexStruct {
+    fn into(self) -> MySimpleStruct {
+        MySimpleStruct { val: self.val }
+    }
+}
+
+#[test]
+fn test_target_struct() {
+    let old = MyComplexStruct {
+        val: 1,
+        derived_val: "irrelevant".to_owned(),
+    };
+    let new = MyComplexStruct {
+        val: 2,
+        derived_val: "also irrelevant".to_owned(),
+    };
+    let expected = MyComplexStruct {
+        val: 2,
+        derived_val: "two".to_owned(),
+    };
+    let diff = Diff::serializable(&old, &new);
+    let json_diff = serde_json::to_string(&diff).unwrap();
+    let mut deserializer = serde_json::Deserializer::from_str(&json_diff);
+    let mut applied = old.clone();
+    Apply::apply(&mut deserializer, &mut applied).unwrap();
+    assert_eq!(applied, expected);
+
+    let bincode_diff = bincode::serialize(&diff).unwrap();
+    let mut target = old;
+
+    bincode::config()
+        .deserialize_seed(Apply::deserializable(&mut target), &bincode_diff)
+        .unwrap();
+    assert_eq!(target, new);
 }

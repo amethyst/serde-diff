@@ -12,13 +12,20 @@ pub fn macro_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     // Parse the struct
     let input = syn::parse_macro_input!(input as syn::DeriveInput);
     let struct_args = args::SerdeDiffStructArgs::from_derive_input(&input).unwrap();
+    let target_type = if let Some(ref target) = struct_args.target {
+        let span = proc_macro2::Span::call_site();
+        let target_type_result = parse_string_to_type(target.to_owned(), span);
+        Some(target_type_result.unwrap()) // is there something useful we could do with this error?
+    } else {
+        None
+    };
     match input.data {
         Data::Struct(..) => {
             if struct_args.opaque {
                  generate_opaque(&input, struct_args)
              } else {
                  // Go ahead and generate the code                 
-                 match generate(&input, struct_args) {
+                 match generate(&input, struct_args, target_type) {
                      Ok(v) => v,
                      Err(v) => v,
                  }
@@ -29,7 +36,7 @@ pub fn macro_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
                  generate_opaque(&input, struct_args)
              } else {
                  // Go ahead and generate the code                 
-                 match generate(&input, struct_args) {
+                 match generate(&input, struct_args, target_type) {
                      Ok(v) => v,
                      Err(v) => v,
                  }
@@ -293,6 +300,7 @@ fn generate_arms(name: &syn::Ident, variant: Option<&syn::Ident>, fields: &syn::
 fn generate(
     input: &syn::DeriveInput,
     struct_args: args::SerdeDiffStructArgs,
+    target_type: Option<syn::Type>,
 ) -> Result<proc_macro::TokenStream, proc_macro::TokenStream> {
 
     use syn::Data;
@@ -307,7 +315,7 @@ fn generate(
                     diff_match_arms.extend(diff);
                     apply_match_arms.extend(apply);
                 }
-            }            
+            }
             true
         }
         Data::Struct(s) => {
@@ -321,13 +329,22 @@ fn generate(
     };
 
     // Generate the SerdeDiff::diff function for the type
-    let diff_fn = quote! {
-        fn diff<'a, S: serde_diff::_serde::ser::SerializeSeq>(&self, ctx: &mut serde_diff::DiffContext<'a, S>, other: &Self) -> Result<bool, S::Error> {
-            let mut __changed__ = false;
-            match (self, other) {
-                #(#diff_match_arms)*
+    let diff_fn = if let Some(ref ty) = target_type {
+        quote! {
+            fn diff<'a, S: serde_diff::_serde::ser::SerializeSeq>(&self, ctx: &mut serde_diff::DiffContext<'a, S>, other: &Self) -> Result<bool, S::Error> {
+                std::convert::Into::<#ty>::into(std::clone::Clone::clone(self))
+                    .diff(ctx, &std::convert::Into::<#ty>::into(std::clone::Clone::clone(other)))
             }
-            Ok(__changed__)
+        }
+    } else {
+        quote! {
+            fn diff<'a, S: serde_diff::_serde::ser::SerializeSeq>(&self, ctx: &mut serde_diff::DiffContext<'a, S>, other: &Self) -> Result<bool, S::Error> {
+                let mut __changed__ = false;
+                match (self, other) {
+                    #(#diff_match_arms)*
+                }
+                Ok(__changed__)
+            }
         }
     };
 
@@ -335,7 +352,7 @@ fn generate(
     // Generate the SerdeDiff::apply function for the type
     //TODO: Consider using something like the phf crate to avoid a string compare across field names,
     // or consider having the user manually tag their data with a number similar to protobuf
-    let apply_fn = if has_variants {
+    let apply_fn = if let Some(ref ty) = target_type {
         quote! {
             fn apply<'de, A>(
                 &mut self,
@@ -344,33 +361,47 @@ fn generate(
             ) -> Result<bool, <A as serde_diff::_serde::de::SeqAccess<'de>>::Error>
             where
                 A: serde_diff::_serde::de::SeqAccess<'de>, {
-                let mut __changed__ = false;
-                match (self, ctx.next_path_element(seq)?) {
-                    (this, Some(serde_diff::DiffPathElementValue::FullEnumVariant)) => {
-                        ctx.read_value(seq, this)?;
-                        __changed__ = true;
-                    }
-                    #(#apply_match_arms)*
-                    _ => ctx.skip_value(seq)?,
-                }
-                Ok(__changed__)
+                    std::convert::Into::<#ty>::into(std::clone::Clone::clone(self)).apply(seq, ctx)
             }
         }
     } else {
-        quote! {
-            fn apply<'de, A>(
-                &mut self,
-                seq: &mut A,
-                ctx: &mut serde_diff::ApplyContext,
-            ) -> Result<bool, <A as serde_diff::_serde::de::SeqAccess<'de>>::Error>
-            where
-                A: serde_diff::_serde::de::SeqAccess<'de>, {
-                let mut __changed__ = false;
-                match (self) {                   
-                    #(#apply_match_arms)*
-                    _ => ctx.skip_value(seq)?,
+        if has_variants {
+            quote! {
+                fn apply<'de, A>(
+                    &mut self,
+                    seq: &mut A,
+                    ctx: &mut serde_diff::ApplyContext,
+                ) -> Result<bool, <A as serde_diff::_serde::de::SeqAccess<'de>>::Error>
+                where
+                    A: serde_diff::_serde::de::SeqAccess<'de>, {
+                    let mut __changed__ = false;
+                    match (self, ctx.next_path_element(seq)?) {
+                        (this, Some(serde_diff::DiffPathElementValue::FullEnumVariant)) => {
+                            ctx.read_value(seq, this)?;
+                            __changed__ = true;
+                        }
+                        #(#apply_match_arms)*
+                        _ => ctx.skip_value(seq)?,
+                    }
+                    Ok(__changed__)
                 }
-                Ok(__changed__)
+            }
+        } else {
+            quote! {
+                fn apply<'de, A>(
+                    &mut self,
+                    seq: &mut A,
+                    ctx: &mut serde_diff::ApplyContext,
+                ) -> Result<bool, <A as serde_diff::_serde::de::SeqAccess<'de>>::Error>
+                where
+                    A: serde_diff::_serde::de::SeqAccess<'de>, {
+                    let mut __changed__ = false;
+                    match (self) {
+                        #(#apply_match_arms)*
+                        _ => ctx.skip_value(seq)?,
+                    }
+                    Ok(__changed__)
+                }
             }
         }
     };
@@ -421,3 +452,31 @@ fn generate_opaque(
         #diff_impl
     });
 }
+
+// Adapted from serde's internal `parse_lit_into_ty` function (with the chain of helper functions directly cargo culted over)
+fn parse_string_to_type(s: String, span: proc_macro2::Span) -> Result<syn::Type, syn::Error> {
+    let lit = syn::LitStr::new(&s, span);
+    let tokens = spanned_tokens(&lit)?;
+    syn::parse2(tokens)
+}
+
+fn spanned_tokens(s: &syn::LitStr) -> syn::parse::Result<proc_macro2::TokenStream> {
+    let stream = syn::parse_str(&s.value())?;
+    Ok(respan_token_stream(stream, s.span()))
+}
+
+fn respan_token_stream(stream: proc_macro2::TokenStream, span: proc_macro2::Span) -> proc_macro2::TokenStream {
+    stream
+        .into_iter()
+        .map(|token| respan_token_tree(token, span))
+        .collect()
+}
+
+fn respan_token_tree(mut token: proc_macro2::TokenTree, span: proc_macro2::Span) -> proc_macro2::TokenTree {
+    if let proc_macro2::TokenTree::Group(g) = &mut token {
+        *g = proc_macro2::Group::new(g.delimiter(), respan_token_stream(g.stream(), span));
+    }
+    token.set_span(span);
+    token
+}
+

@@ -139,45 +139,38 @@ fn test_tuple() {
 #[serde(from = "MySimpleStruct", into = "MySimpleStruct")]
 #[serde_diff(target = "MySimpleStruct")]
 struct MyComplexStruct {
-    val: u32,
-    derived_val: String,
+    // This field will be serialized
+    a: u32,
+    // This field will not be serialized, because it is not needed for <some reason>
+    b: u32,
 }
 
-#[derive(SerdeDiff, Serialize, Deserialize, Default, PartialEq)]
+#[derive(SerdeDiff, Serialize, Deserialize, Default, PartialEq, Debug)]
 #[serde(rename = "MyComplexStruct", default)]
 struct MySimpleStruct {
-    val: u32,
+    a: u32,
 }
 
 impl From<MySimpleStruct> for MyComplexStruct {
     fn from(my_simple_struct: MySimpleStruct) -> Self {
         MyComplexStruct {
-            val: my_simple_struct.val,
-            derived_val: my_simple_struct.val.to_string(),
+            a: my_simple_struct.a,
+            b: 0, // this value wasn't serialized, so we'll just default it to zero
         }
     }
 }
 
 impl Into<MySimpleStruct> for MyComplexStruct {
     fn into(self) -> MySimpleStruct {
-        MySimpleStruct { val: self.val }
+        MySimpleStruct { a: self.a }
     }
 }
 
-#[test]
-fn test_target_struct() {
-    let old = MyComplexStruct {
-        val: 1,
-        derived_val: "irrelevant".to_owned(),
-    };
-    let new = MyComplexStruct {
-        val: 2,
-        derived_val: "also irrelevant".to_owned(),
-    };
-    let expected = MyComplexStruct {
-        val: 2,
-        derived_val: "two".to_owned(),
-    };
+fn targeted_roundtrip<T, U>(old: T, new: T, expected: T)
+where
+    T: SerdeDiff + Serialize + for<'a> Deserialize<'a> + PartialEq + Debug + Clone,
+    U: SerdeDiff + Serialize + for<'a> Deserialize<'a>,
+{
     let diff = Diff::serializable(&old, &new);
     let json_diff = serde_json::to_string(&diff).unwrap();
     let mut deserializer = serde_json::Deserializer::from_str(&json_diff);
@@ -186,10 +179,24 @@ fn test_target_struct() {
     assert_eq!(applied, expected);
 
     let bincode_diff = bincode::serialize(&diff).unwrap();
-    let mut target = old;
+    let mut applied = old;
 
     bincode::config()
-        .deserialize_seed(Apply::deserializable(&mut target), &bincode_diff)
+        .deserialize_seed(Apply::deserializable(&mut applied), &bincode_diff)
         .unwrap();
-    assert_eq!(target, new);
+    assert_eq!(applied, expected);
+}
+
+#[test]
+fn test_targeted() {
+    targeted_roundtrip::<MyComplexStruct, MySimpleStruct>(
+        MyComplexStruct { a: 1, b: 777 },
+        MyComplexStruct { a: 2, b: 999 },
+        MyComplexStruct { a: 2, b: 0 },
+    );
+    targeted_roundtrip::<Option<MyComplexStruct>, Option<MySimpleStruct>>(
+        Some(MyComplexStruct { a: 1, b: 777 }),
+        Some(MyComplexStruct { a: 2, b: 999 }),
+        Some(MyComplexStruct { a: 2, b: 0 }),
+    );
 }

@@ -20,19 +20,8 @@ pub fn macro_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         None
     };
     match input.data {
-        Data::Struct(..) => {
+        Data::Struct(..) | Data::Enum(..) => {
             if struct_args.opaque {
-                 generate_opaque(&input, struct_args)
-             } else {
-                 // Go ahead and generate the code                 
-                 match generate(&input, struct_args, target_type) {
-                     Ok(v) => v,
-                     Err(v) => v,
-                 }
-             }
-        }
-        Data::Enum(..) => {
-             if struct_args.opaque {
                  generate_opaque(&input, struct_args)
              } else {
                  // Go ahead and generate the code                 

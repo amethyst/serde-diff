@@ -361,7 +361,10 @@ fn generate(
             ) -> Result<bool, <A as serde_diff::_serde::de::SeqAccess<'de>>::Error>
             where
                 A: serde_diff::_serde::de::SeqAccess<'de>, {
-                    std::convert::Into::<#ty>::into(std::clone::Clone::clone(self)).apply(seq, ctx)
+                    let mut converted = std::convert::Into::<#ty>::into(std::clone::Clone::clone(self));
+                    let result = converted.apply(seq, ctx);
+                    *self = std::convert::From::<#ty>::from(converted);
+                    result
             }
         }
     } else {

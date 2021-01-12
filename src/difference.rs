@@ -397,7 +397,7 @@ impl<'de> de::Visitor<'de> for DiffCommandFieldVisitor {
             b"RemoveKey" => Ok(DiffCommandField::RemoveKey),
             b"Exit" => Ok(DiffCommandField::Exit),
             _ => {
-                let value = &serde::export::from_utf8_lossy(value);
+                let value = &String::from_utf8_lossy(value);
                 Err(de::Error::unknown_variant(value, VARIANTS))
             }
         }

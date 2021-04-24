@@ -96,7 +96,7 @@ macro_rules! tuple_impls {
                 ) -> Result<bool, S::Error> {
                     let mut changed = false;
                     $(
-                        ctx.push_field(stringify!($n));
+                        ctx.push_field_index($n);
                         changed |= <$name as $crate::SerdeDiff>::diff(&self.$n, ctx, &other.$n)?;
                         ctx.pop_path_element()?;
                     )+
@@ -112,10 +112,10 @@ macro_rules! tuple_impls {
                     A: serde::de::SeqAccess<'de>,
                 {
                     let mut changed = false;
-                    while let Some($crate::difference::DiffPathElementValue::Field(element)) = ctx.next_path_element(seq)? {
-                        match element.as_ref() {
+                    while let Some($crate::difference::DiffPathElementValue::FieldIndex(element)) = ctx.next_path_element(seq)? {
+                        match element {
                             $(
-                                stringify!($n) => changed |= <$name as $crate::SerdeDiff>::apply(&mut self.$n, seq, ctx)?,
+                                $n => changed |= <$name as $crate::SerdeDiff>::apply(&mut self.$n, seq, ctx)?,
                             )+
                             _ => ctx.skip_value(seq)?,
                         }

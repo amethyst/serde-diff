@@ -386,6 +386,8 @@ fn generate(
                         #(#apply_match_arms)*
                         _ => ctx.skip_value(seq)?,
                     }
+                    // Consume the extra Exit command generated at the end of enums.
+                    ctx.next_path_element(seq)?;
                     Ok(__changed__)
                 }
             }

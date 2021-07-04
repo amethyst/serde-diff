@@ -34,11 +34,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map
         .insert("hi".to_string(), vec!["planet".to_string()]);
 
+    let mut hi_planet_hello_world = TestStruct::default();
+    hi_planet_hello_world
+        .map
+        .insert("hi".to_string(), vec!["planet".to_string()]);
+    hi_planet_hello_world
+        .map
+        .insert("hello".to_string(), vec!["world".to_string()]);
+
     let add_hello = serde_json::to_string(&Diff::serializable(&empty, &hello_world))?;
     let hello_to_hi = serde_json::to_string(&Diff::serializable(&hello_world, &hi_world))?;
     let add_planet = serde_json::to_string(&Diff::serializable(&hi_world, &hi_world_and_planet))?;
     let del_world = serde_json::to_string(&Diff::serializable(&hi_world_and_planet, &hi_planet))?;
     let no_change = serde_json::to_string(&Diff::serializable(&hi_planet, &hi_planet))?;
+    let add_world = serde_json::to_string(&Diff::serializable(&hi_planet, &hi_planet_hello_world))?;
 
     let mut built = TestStruct::default();
     for (diff, after) in &[
@@ -47,6 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         (add_planet, hi_world_and_planet),
         (del_world, hi_planet.clone()),
         (no_change, hi_planet),
+        (add_world, hi_planet_hello_world),
     ] {
         println!("{}", diff);
 

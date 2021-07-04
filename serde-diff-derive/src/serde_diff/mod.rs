@@ -77,7 +77,7 @@ fn generate_fields_diff(
         let right = format_ident!("r{}", field_idx);
 
         let push = if let Some(_) = ident {
-            quote!{ctx.push_field(#ident_as_str);}
+            quote!{ctx.push_field(#field_idx, #ident_as_str);}
         } else {
             quote!{ctx.push_field_index(#field_idx);}
         };
@@ -170,7 +170,7 @@ fn ok_fields(fields : &syn::Fields) -> Result<Vec<ParsedField>, proc_macro::Toke
     }
 }
 
-fn generate_arms(name: &syn::Ident, variant: Option<&syn::Ident>, fields: &syn::Fields, matching: bool)
+fn generate_arms(name: &syn::Ident, variant: Option<(u16, &syn::Ident)>, fields: &syn::Fields, matching: bool)
                  -> Result<(Vec<proc_macro2::TokenStream>, Vec<proc_macro2::TokenStream>),
                            proc_macro2::TokenStream>
 {
@@ -182,14 +182,15 @@ fn generate_arms(name: &syn::Ident, variant: Option<&syn::Ident>, fields: &syn::
         matching,
     );                    
     let (left, right) =  enum_fields(&fields, false);
-    let variant_specifier = if let Some(id) = variant {
+    let variant_specifier = if let Some((_, id)) = variant {
         quote!{ :: #id}
     } else {
         quote!{}
     };
     
-    let variant_as_str = variant.map(|i| i.to_string());
-    let push_variant = variant.map(|_| quote!{ctx.push_variant(#variant_as_str);});
+    let variant_idx = variant.map(|(i, _)| i);
+    let variant_as_str = variant.map(|(_, i)| i.to_string());
+    let push_variant = variant.map(|_| quote!{ctx.push_variant(#variant_idx, #variant_as_str);});
     let pop_variant = variant.map(|_| quote!{ctx.pop_path_element()?;});
     
     let left = if matching {
@@ -260,6 +261,16 @@ fn generate_arms(name: &syn::Ident, variant: Option<&syn::Ident>, fields: &syn::
 
         if let Some(_) = variant {
             apply_match_arms.push(quote!{
+                ( &mut #name #variant_specifier #left, Some(serde_diff::DiffPathElementValue::EnumVariantIndex(#variant_idx))) => {
+                    while let Some(element) = ctx.next_path_element(seq)? {
+                        match element {
+                            #(#apply_fn_field_handlers)* 
+                            _ =>  ctx.skip_value(seq)?
+                        }
+                    }
+                }
+            });
+            apply_match_arms.push(quote!{
                 ( &mut #name #variant_specifier #left, Some(serde_diff::DiffPathElementValue::EnumVariant(variant))) if variant == #variant_as_str => {
                     while let Some(element) = ctx.next_path_element(seq)? {
                         match element {
@@ -299,8 +310,8 @@ fn generate(
     let has_variants = match &input.data {
         Data::Enum(e) => {
             for matching in &[true, false] {
-                for v in &e.variants {
-                    let (diff, apply) = generate_arms(&struct_args.ident, Some(&v.ident), &v.fields, *matching)?;
+                for (i, v) in e.variants.iter().enumerate() {
+                    let (diff, apply) = generate_arms(&struct_args.ident, Some((i as u16, &v.ident)), &v.fields, *matching)?;
                     diff_match_arms.extend(diff);
                     apply_match_arms.extend(apply);
                 }
@@ -375,6 +386,8 @@ fn generate(
                         #(#apply_match_arms)*
                         _ => ctx.skip_value(seq)?,
                     }
+                    // Consume the extra Exit command generated at the end of enums.
+                    ctx.next_path_element(seq)?;
                     Ok(__changed__)
                 }
             }

@@ -52,6 +52,8 @@ serde_json
 - [x] BTreeMap (thanks @milkey-mouse)
 - [x] Fixed-size arrays (thanks @Boscop)
 - [x] Tuples (thanks @Boscop)
+- [x] HashSet (thanks @Diggsey)
+- [x] BTreeSet (thanks @Diggsey)
 
 # Simple example
 

@@ -58,21 +58,38 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
     /// Called when we visit a field. If the structure is recursive (i.e. struct within struct,
     /// elements within an array) this may be called more than once before a corresponding pop_path_element
     /// is called. See `pop_path_element`
-    pub fn push_field(&mut self, field_name: &'static str) {
-        self.element_stack
-            .as_mut()
-            .unwrap()
-            .push(ElementStackEntry::PathElement(DiffPathElementValue::Field(
-                Cow::Borrowed(field_name),
-            )));
+    pub fn push_field(&mut self, field_idx: u16, field_name: &'static str) {
+        if matches!(self.field_path_mode, FieldPathMode::Index) {
+            self.push_field_index(field_idx);
+        } else {
+            self.element_stack
+                .as_mut()
+                .unwrap()
+                .push(ElementStackEntry::PathElement(DiffPathElementValue::Field(
+                    Cow::Borrowed(field_name),
+                )));
+        }
     }
 
-    pub fn push_variant(&mut self, variant_name: &'static str) {
+    pub fn push_variant(&mut self, variant_idx: u16, variant_name: &'static str) {
+        if matches!(self.field_path_mode, FieldPathMode::Index) {
+            self.push_variant_index(variant_idx);
+        } else {
+            self.element_stack
+                .as_mut()
+                .unwrap()
+                .push(ElementStackEntry::PathElement(
+                    DiffPathElementValue::EnumVariant(Cow::Borrowed(variant_name)),
+                ));
+        }
+    }
+
+    pub fn push_variant_index(&mut self, variant_idx: u16) {
         self.element_stack
             .as_mut()
             .unwrap()
             .push(ElementStackEntry::PathElement(
-                DiffPathElementValue::EnumVariant(Cow::Borrowed(variant_name)),
+                DiffPathElementValue::EnumVariantIndex(variant_idx),
             ));
     }
 
@@ -601,6 +618,7 @@ pub enum DiffPathElementValue<'a> {
     Field(Cow<'a, str>),
     FieldIndex(u16),
     EnumVariant(Cow<'a, str>),
+    EnumVariantIndex(u16),
     FullEnumVariant,
     CollectionIndex(usize),
     AddToCollection,

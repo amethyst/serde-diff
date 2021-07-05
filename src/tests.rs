@@ -2,6 +2,7 @@ use crate as serde_diff;
 use crate::{Apply, Diff, SerdeDiff};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
+use std::cell::Cell;
 use std::fmt::Debug;
 
 #[derive(SerdeDiff, Serialize, Deserialize, PartialEq, Debug, Copy, Clone)]
@@ -146,7 +147,7 @@ struct MyComplexStruct {
     b: u32,
 }
 
-#[derive(SerdeDiff, Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
+#[derive(SerdeDiff, Serialize, Deserialize, Copy, Clone, PartialEq, Debug, Default)]
 #[serde(rename = "MyComplexStruct", default)]
 struct MySimpleStruct {
     a: u32,
@@ -155,6 +156,16 @@ struct MySimpleStruct {
 #[derive(SerdeDiff, Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
 struct MyCowStruct<'a> {
     a: Cow<'a, MySimpleStruct>,
+}
+
+#[derive(SerdeDiff, Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
+struct MyBoxStruct {
+    a: Box<MySimpleStruct>,
+}
+
+#[derive(SerdeDiff, Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
+struct MyCellStruct {
+    a: Cell<MySimpleStruct>,
 }
 
 impl From<MySimpleStruct> for MyComplexStruct {
@@ -241,6 +252,32 @@ fn test_cow() {
         },
         MyCowStruct {
             a: Cow::Borrowed(&b),
+        },
+    );
+}
+
+
+#[test]
+fn test_box() {
+    roundtrip(
+        MyBoxStruct {
+            a: Box::new(MySimpleStruct { a: 0 }),
+        },
+        MyBoxStruct {
+            a: Box::new(MySimpleStruct { a: 10 }),
+        },
+    );
+}
+
+
+#[test]
+fn test_cell() {
+    roundtrip(
+        MyCellStruct {
+            a: Cell::new(MySimpleStruct { a: 0 }),
+        },
+        MyCellStruct {
+            a: Cell::new(MySimpleStruct { a: 10 }),
         },
     );
 }

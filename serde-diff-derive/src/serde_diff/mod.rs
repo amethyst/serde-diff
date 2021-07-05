@@ -320,14 +320,14 @@ fn generate(
     // Generate the SerdeDiff::diff function for the type
     let diff_fn = if let Some(ref ty) = target_type {
         quote! {
-            fn diff<'a, S: serde_diff::_serde::ser::SerializeSeq>(&self, ctx: &mut serde_diff::DiffContext<'a, S>, other: &Self) -> Result<bool, S::Error> {
+            fn diff<'sd, S: serde_diff::_serde::ser::SerializeSeq>(&self, ctx: &mut serde_diff::DiffContext<'sd, S>, other: &Self) -> Result<bool, S::Error> {
                 std::convert::Into::<#ty>::into(std::clone::Clone::clone(self))
                     .diff(ctx, &std::convert::Into::<#ty>::into(std::clone::Clone::clone(other)))
             }
         }
     } else {
         quote! {
-            fn diff<'a, S: serde_diff::_serde::ser::SerializeSeq>(&self, ctx: &mut serde_diff::DiffContext<'a, S>, other: &Self) -> Result<bool, S::Error> {
+            fn diff<'sd, S: serde_diff::_serde::ser::SerializeSeq>(&self, ctx: &mut serde_diff::DiffContext<'sd, S>, other: &Self) -> Result<bool, S::Error> {
                 let mut __changed__ = false;
                 match (self, other) {
                     #(#diff_match_arms)*
@@ -420,7 +420,7 @@ fn generate_opaque(
     let struct_name = &struct_args.ident;
     let diff_impl = quote! {
         impl serde_diff::SerdeDiff for #struct_name {
-            fn diff<'a, S: serde_diff::_serde::ser::SerializeSeq>(&self, ctx: &mut serde_diff::DiffContext<'a, S>, other: &Self) -> Result<bool, S::Error> {
+            fn diff<'sd, S: serde_diff::_serde::ser::SerializeSeq>(&self, ctx: &mut serde_diff::DiffContext<'sd, S>, other: &Self) -> Result<bool, S::Error> {
                 if self != other {
                     ctx.save_value(other)?;
                     Ok(true)

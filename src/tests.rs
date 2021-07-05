@@ -153,8 +153,8 @@ struct MySimpleStruct {
 }
 
 #[derive(SerdeDiff, Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
-struct MyCowStruct<'x> {
-    a: Cow<'x, MySimpleStruct>,
+struct MyCowStruct<'a> {
+    a: Cow<'a, MySimpleStruct>,
 }
 
 impl From<MySimpleStruct> for MyComplexStruct {

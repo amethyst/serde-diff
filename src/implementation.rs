@@ -7,6 +7,7 @@ use crate::{
 use serde::{de, ser::SerializeSeq, Deserialize, Serialize};
 
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, HashMap},
     hash::Hash,
 };
@@ -409,3 +410,29 @@ impl<T: SerdeDiff + Serialize + for<'a> Deserialize<'a>> SerdeDiff for Option<T>
 
 type Unit = ();
 opaque_serde_diff!(Unit);
+
+impl<'xyz, B: ?Sized + 'xyz> SerdeDiff for Cow<'xyz, B>
+where
+    B: Clone,
+    B: SerdeDiff,
+    <B as ToOwned>::Owned: SerdeDiff,
+{
+    fn diff<'a, S: serde::ser::SerializeSeq>(
+        &self,
+        ctx: &mut DiffContext<'a, S>,
+        other: &Self,
+    ) -> Result<bool, S::Error> {
+        (&self as &B).diff(ctx, other)
+    }
+
+    fn apply<'de, A>(
+        &mut self,
+        seq: &mut A,
+        ctx: &mut ApplyContext,
+    ) -> Result<bool, <A as serde::de::SeqAccess<'de>>::Error>
+    where
+        A: serde::de::SeqAccess<'de>,
+    {
+        self.to_mut().apply(seq, ctx)
+    }
+}

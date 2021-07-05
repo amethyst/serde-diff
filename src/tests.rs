@@ -1,6 +1,7 @@
 use crate as serde_diff;
 use crate::{Apply, Diff, SerdeDiff};
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::fmt::Debug;
 
 #[derive(SerdeDiff, Serialize, Deserialize, PartialEq, Debug, Copy, Clone)]
@@ -135,7 +136,7 @@ fn test_tuple() {
     );
 }
 
-#[derive(SerdeDiff, Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(SerdeDiff, Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
 #[serde(from = "MySimpleStruct", into = "MySimpleStruct")]
 #[serde_diff(target = "MySimpleStruct")]
 struct MyComplexStruct {
@@ -145,10 +146,15 @@ struct MyComplexStruct {
     b: u32,
 }
 
-#[derive(SerdeDiff, Serialize, Deserialize, Default, PartialEq, Debug)]
+#[derive(SerdeDiff, Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
 #[serde(rename = "MyComplexStruct", default)]
 struct MySimpleStruct {
     a: u32,
+}
+
+#[derive(SerdeDiff, Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
+struct MyCowStruct<'x> {
+    a: Cow<'x, MySimpleStruct>,
 }
 
 impl From<MySimpleStruct> for MyComplexStruct {
@@ -198,5 +204,43 @@ fn test_targeted() {
         Some(MyComplexStruct { a: 1, b: 777 }),
         Some(MyComplexStruct { a: 2, b: 999 }),
         Some(MyComplexStruct { a: 2, b: 0 }),
+    );
+}
+
+#[test]
+fn test_cow() {
+    roundtrip(
+        MyCowStruct {
+            a: Cow::Owned(MySimpleStruct { a: 0 }),
+        },
+        MyCowStruct {
+            a: Cow::Owned(MySimpleStruct { a: 10 }),
+        },
+    );
+    let a = MySimpleStruct { a: 0 };
+    let b = MySimpleStruct { a: 1 };
+    roundtrip(
+        MyCowStruct {
+            a: Cow::Borrowed(&a),
+        },
+        MyCowStruct {
+            a: Cow::Owned(MySimpleStruct { a: 10 }),
+        },
+    );
+    roundtrip(
+        MyCowStruct {
+            a: Cow::Owned(MySimpleStruct { a: 0 }),
+        },
+        MyCowStruct {
+            a: Cow::Borrowed(&b),
+        },
+    );
+    roundtrip(
+        MyCowStruct {
+            a: Cow::Borrowed(&a),
+        },
+        MyCowStruct {
+            a: Cow::Borrowed(&b),
+        },
     );
 }

@@ -8,7 +8,7 @@ use quote::{quote, format_ident};
 pub fn macro_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     use darling::FromDeriveInput;
     use syn::Data;
-    
+
     // Parse the struct
     let input = syn::parse_macro_input!(input as syn::DeriveInput);
     let struct_args = args::SerdeDiffStructArgs::from_derive_input(&input).unwrap();
@@ -24,7 +24,7 @@ pub fn macro_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
             if struct_args.opaque {
                  generate_opaque(&input, struct_args)
              } else {
-                 // Go ahead and generate the code                 
+                 // Go ahead and generate the code
                  match generate(&input, struct_args, target_type) {
                      Ok(v) => v,
                      Err(v) => v,
@@ -142,7 +142,7 @@ fn enum_fields(fields : &syn::Fields, mutable: bool) -> (proc_macro2::TokenStrea
             Fields::Unit => vec![]
         }
     };
-    let (left, right) = (fields_match(fields, "l"), fields_match(fields, "r"));    
+    let (left, right) = (fields_match(fields, "l"), fields_match(fields, "r"));
     let (left, right) = match fields {
         Fields::Named(_)  => (quote!{{#(#left),*}}, quote!{{#(#right),*}}),
         Fields::Unnamed(_)  => (quote!{(#(#left),*)}, quote!{(#(#right),*)}),
@@ -180,25 +180,25 @@ fn generate_arms(name: &syn::Ident, variant: Option<&syn::Ident>, fields: &syn::
     let diffs = generate_fields_diff(
         &parsed_fields,
         matching,
-    );                    
+    );
     let (left, right) =  enum_fields(&fields, false);
     let variant_specifier = if let Some(id) = variant {
         quote!{ :: #id}
     } else {
         quote!{}
     };
-    
+
     let variant_as_str = variant.map(|i| i.to_string());
     let push_variant = variant.map(|_| quote!{ctx.push_variant(#variant_as_str);});
     let pop_variant = variant.map(|_| quote!{ctx.pop_path_element()?;});
-    
+
     let left = if matching {
         quote! { #name #variant_specifier #left }
     } else {
         quote! {_}
     };
     if matching {
-        diff_match_arms.push(                  
+        diff_match_arms.push(
             quote!{
                 (#left, #name #variant_specifier #right) => {
                     #push_variant
@@ -208,7 +208,7 @@ fn generate_arms(name: &syn::Ident, variant: Option<&syn::Ident>, fields: &syn::
             }
         );
     } else {
-        diff_match_arms.push(                  
+        diff_match_arms.push(
             quote!{
                 (#left, #name #variant_specifier #right) => {
                     ctx.push_full_variant();
@@ -216,9 +216,9 @@ fn generate_arms(name: &syn::Ident, variant: Option<&syn::Ident>, fields: &syn::
                     ctx.pop_path_element()?;
                 }
             }
-        );  
+        );
     }
-    
+
     if matching {
         let (left, _right) =  enum_fields(fields, true);
         let mut apply_fn_field_handlers = vec![];
@@ -251,7 +251,7 @@ fn generate_arms(name: &syn::Ident, variant: Option<&syn::Ident>, fields: &syn::
                 ));
                 if let Some(ident_as_str) = ident.map(|s| s.to_string()) {
                     apply_fn_field_handlers.push(quote!(
-                        serde_diff::DiffPathElementValue::Field(field) if field == #ident_as_str => 
+                        serde_diff::DiffPathElementValue::Field(field) if field == #ident_as_str =>
                             __changed__ |= <#ty as serde_diff::SerdeDiff>::apply(#lhs, seq, ctx)?,
                     ));
                 }
@@ -263,7 +263,7 @@ fn generate_arms(name: &syn::Ident, variant: Option<&syn::Ident>, fields: &syn::
                 ( &mut #name #variant_specifier #left, Some(serde_diff::DiffPathElementValue::EnumVariant(variant))) if variant == #variant_as_str => {
                     while let Some(element) = ctx.next_path_element(seq)? {
                         match element {
-                            #(#apply_fn_field_handlers)* 
+                            #(#apply_fn_field_handlers)*
                             _ =>  ctx.skip_value(seq)?
                         }
                     }
@@ -274,7 +274,7 @@ fn generate_arms(name: &syn::Ident, variant: Option<&syn::Ident>, fields: &syn::
                 ( &mut #name #variant_specifier #left)  => {
                     while let Some(element) = ctx.next_path_element(seq)? {
                         match element {
-                            #(#apply_fn_field_handlers)* 
+                            #(#apply_fn_field_handlers)*
                             _ =>  ctx.skip_value(seq)?
                         }
                     }
@@ -320,14 +320,14 @@ fn generate(
     // Generate the SerdeDiff::diff function for the type
     let diff_fn = if let Some(ref ty) = target_type {
         quote! {
-            fn diff<'a, S: serde_diff::_serde::ser::SerializeSeq>(&self, ctx: &mut serde_diff::DiffContext<'a, S>, other: &Self) -> Result<bool, S::Error> {
+            fn diff<'sd, S: serde_diff::_serde::ser::SerializeSeq>(&self, ctx: &mut serde_diff::DiffContext<'sd, S>, other: &Self) -> Result<bool, S::Error> {
                 std::convert::Into::<#ty>::into(std::clone::Clone::clone(self))
                     .diff(ctx, &std::convert::Into::<#ty>::into(std::clone::Clone::clone(other)))
             }
         }
     } else {
         quote! {
-            fn diff<'a, S: serde_diff::_serde::ser::SerializeSeq>(&self, ctx: &mut serde_diff::DiffContext<'a, S>, other: &Self) -> Result<bool, S::Error> {
+            fn diff<'sd, S: serde_diff::_serde::ser::SerializeSeq>(&self, ctx: &mut serde_diff::DiffContext<'sd, S>, other: &Self) -> Result<bool, S::Error> {
                 let mut __changed__ = false;
                 match (self, other) {
                     #(#diff_match_arms)*
@@ -337,7 +337,7 @@ fn generate(
         }
     };
 
-    
+
     // Generate the SerdeDiff::apply function for the type
     //TODO: Consider using something like the phf crate to avoid a string compare across field names,
     // or consider having the user manually tag their data with a number similar to protobuf
@@ -403,7 +403,7 @@ fn generate(
     let generics = &struct_args.generics.params;
     let where_clause =  &struct_args.generics.where_clause;
     let diff_impl = quote! {
-        impl <#generics> serde_diff::SerdeDiff for #struct_name < #generics> #where_clause {
+        impl <#generics> serde_diff::SerdeDiff for #struct_name <#generics> #where_clause {
             #diff_fn
             #apply_fn
         }
@@ -418,9 +418,11 @@ fn generate_opaque(
     struct_args: args::SerdeDiffStructArgs,
 ) -> proc_macro::TokenStream {
     let struct_name = &struct_args.ident;
+    let generics = &struct_args.generics.params;
+    let where_clause =  &struct_args.generics.where_clause;
     let diff_impl = quote! {
-        impl serde_diff::SerdeDiff for #struct_name {
-            fn diff<'a, S: serde_diff::_serde::ser::SerializeSeq>(&self, ctx: &mut serde_diff::DiffContext<'a, S>, other: &Self) -> Result<bool, S::Error> {
+        impl <#generics> serde_diff::SerdeDiff for #struct_name <#generics> #where_clause {
+            fn diff<'sd, S: serde_diff::_serde::ser::SerializeSeq>(&self, ctx: &mut serde_diff::DiffContext<'sd, S>, other: &Self) -> Result<bool, S::Error> {
                 if self != other {
                     ctx.save_value(other)?;
                     Ok(true)
@@ -471,4 +473,3 @@ fn respan_token_tree(mut token: proc_macro2::TokenTree, span: proc_macro2::Span)
     token.set_span(span);
     token
 }
-

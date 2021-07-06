@@ -1,6 +1,8 @@
 use crate as serde_diff;
 use crate::{Apply, Diff, SerdeDiff};
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+use std::cell::Cell;
 use std::fmt::Debug;
 
 #[derive(SerdeDiff, Serialize, Deserialize, PartialEq, Debug, Copy, Clone)]
@@ -135,7 +137,7 @@ fn test_tuple() {
     );
 }
 
-#[derive(SerdeDiff, Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(SerdeDiff, Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
 #[serde(from = "MySimpleStruct", into = "MySimpleStruct")]
 #[serde_diff(target = "MySimpleStruct")]
 struct MyComplexStruct {
@@ -145,10 +147,25 @@ struct MyComplexStruct {
     b: u32,
 }
 
-#[derive(SerdeDiff, Serialize, Deserialize, Default, PartialEq, Debug)]
+#[derive(SerdeDiff, Serialize, Deserialize, Copy, Clone, PartialEq, Debug, Default)]
 #[serde(rename = "MyComplexStruct", default)]
 struct MySimpleStruct {
     a: u32,
+}
+
+#[derive(SerdeDiff, Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
+struct MyCowStruct<'a> {
+    a: Cow<'a, MySimpleStruct>,
+}
+
+#[derive(SerdeDiff, Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
+struct MyBoxStruct {
+    a: Box<MySimpleStruct>,
+}
+
+#[derive(SerdeDiff, Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
+struct MyCellStruct {
+    a: Cell<MySimpleStruct>,
 }
 
 impl From<MySimpleStruct> for MyComplexStruct {
@@ -198,5 +215,85 @@ fn test_targeted() {
         Some(MyComplexStruct { a: 1, b: 777 }),
         Some(MyComplexStruct { a: 2, b: 999 }),
         Some(MyComplexStruct { a: 2, b: 0 }),
+    );
+}
+
+#[test]
+fn test_cow() {
+    roundtrip(
+        MyCowStruct {
+            a: Cow::Owned(MySimpleStruct { a: 0 }),
+        },
+        MyCowStruct {
+            a: Cow::Owned(MySimpleStruct { a: 10 }),
+        },
+    );
+    let a = MySimpleStruct { a: 0 };
+    let b = MySimpleStruct { a: 1 };
+    roundtrip(
+        MyCowStruct {
+            a: Cow::Borrowed(&a),
+        },
+        MyCowStruct {
+            a: Cow::Owned(MySimpleStruct { a: 10 }),
+        },
+    );
+    roundtrip(
+        MyCowStruct {
+            a: Cow::Owned(MySimpleStruct { a: 0 }),
+        },
+        MyCowStruct {
+            a: Cow::Borrowed(&b),
+        },
+    );
+    roundtrip(
+        MyCowStruct {
+            a: Cow::Borrowed(&a),
+        },
+        MyCowStruct {
+            a: Cow::Borrowed(&b),
+        },
+    );
+}
+
+
+#[test]
+fn test_box() {
+    roundtrip(
+        MyBoxStruct {
+            a: Box::new(MySimpleStruct { a: 0 }),
+        },
+        MyBoxStruct {
+            a: Box::new(MySimpleStruct { a: 10 }),
+        },
+    );
+}
+
+
+#[test]
+fn test_cell() {
+    roundtrip(
+        MyCellStruct {
+            a: Cell::new(MySimpleStruct { a: 0 }),
+        },
+        MyCellStruct {
+            a: Cell::new(MySimpleStruct { a: 10 }),
+        },
+    );
+}
+
+
+#[derive(PartialEq, Eq, Debug, Clone)]
+#[derive(Serialize, Deserialize)]
+#[derive(SerdeDiff)]
+#[serde_diff(opaque)]
+struct Foo<'a>(Cow<'a, [u8]>);
+
+
+#[test]
+fn test_generic_opaque() {
+    roundtrip(
+        Foo(Cow::Owned(vec![1,2,3])),
+        Foo(Cow::Owned(vec![1,2,3])),
     );
 }

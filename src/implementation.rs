@@ -6,10 +6,7 @@ use crate::{
 
 use serde::{de, ser::SerializeSeq, Deserialize, Serialize};
 
-use std::{
-    collections::{BTreeMap, HashMap},
-    hash::Hash,
-};
+use std::{borrow::Cow, cell::{Cell}, collections::{BTreeMap, HashMap}, hash::Hash};
 
 macro_rules! array_impls {
     ($($len:tt)+) => {
@@ -409,3 +406,77 @@ impl<T: SerdeDiff + Serialize + for<'a> Deserialize<'a>> SerdeDiff for Option<T>
 
 type Unit = ();
 opaque_serde_diff!(Unit);
+
+impl<'xyz, B: ?Sized + 'xyz> SerdeDiff for Cow<'xyz, B>
+where
+    B: Clone,
+    B: SerdeDiff,
+    <B as ToOwned>::Owned: SerdeDiff,
+{
+    fn diff<'a, S: serde::ser::SerializeSeq>(
+        &self,
+        ctx: &mut DiffContext<'a, S>,
+        other: &Self,
+    ) -> Result<bool, S::Error> {
+        (&self as &B).diff(ctx, other)
+    }
+
+    fn apply<'de, A>(
+        &mut self,
+        seq: &mut A,
+        ctx: &mut ApplyContext,
+    ) -> Result<bool, <A as serde::de::SeqAccess<'de>>::Error>
+    where
+        A: serde::de::SeqAccess<'de>,
+    {
+        self.to_mut().apply(seq, ctx)
+    }
+}
+
+impl<T> SerdeDiff for Box<T>
+where
+    T: SerdeDiff,
+{
+    fn diff<'a, S: SerializeSeq>(
+        &self,
+        ctx: &mut crate::difference::DiffContext<'a, S>,
+        other: &Self,
+    ) -> Result<bool, S::Error> {
+        self.as_ref().diff(ctx, other)
+    }
+
+    fn apply<'de, A>(
+        &mut self,
+        seq: &mut A,
+        ctx: &mut crate::apply::ApplyContext,
+    ) -> Result<bool, <A as serde::de::SeqAccess<'de>>::Error>
+    where
+        A: de::SeqAccess<'de>,
+    {
+        self.as_mut().apply(seq, ctx)
+    }
+}
+
+impl<T> SerdeDiff for Cell<T>
+where
+    T: SerdeDiff + Copy,
+{
+    fn diff<'a, S: SerializeSeq>(
+        &self,
+        ctx: &mut crate::difference::DiffContext<'a, S>,
+        other: &Self,
+    ) -> Result<bool, S::Error> {
+        self.get().diff(ctx, &other.get())
+    }
+
+    fn apply<'de, A>(
+        &mut self,
+        seq: &mut A,
+        ctx: &mut crate::apply::ApplyContext,
+    ) -> Result<bool, <A as serde::de::SeqAccess<'de>>::Error>
+    where
+        A: de::SeqAccess<'de>,
+    {
+        self.get_mut().apply(seq, ctx)
+    }
+}

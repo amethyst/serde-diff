@@ -281,3 +281,19 @@ fn test_cell() {
         },
     );
 }
+
+
+#[derive(PartialEq, Eq, Debug, Clone)]
+#[derive(Serialize, Deserialize)]
+#[derive(SerdeDiff)]
+#[serde_diff(opaque)]
+struct Foo<'a>(Cow<'a, [u8]>);
+
+
+#[test]
+fn test_generic_opaque() {
+    roundtrip(
+        Foo(Cow::Owned(vec![1,2,3])),
+        Foo(Cow::Owned(vec![1,2,3])),
+    );
+}

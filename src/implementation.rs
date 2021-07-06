@@ -6,7 +6,7 @@ use crate::{
 
 use serde::{de, ser::SerializeSeq, Deserialize, Serialize};
 
-use std::{borrow::Cow, cell::{Cell, RefCell}, collections::{BTreeMap, HashMap}, hash::Hash, rc::Rc, sync::Arc};
+use std::{borrow::Cow, cell::{Cell}, collections::{BTreeMap, HashMap}, hash::Hash};
 
 macro_rules! array_impls {
     ($($len:tt)+) => {

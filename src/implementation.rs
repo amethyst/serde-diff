@@ -150,7 +150,7 @@ macro_rules! map_serde_diff {
     ($t:ty, $($extra_traits:path),*) => {
         impl<K, V> SerdeDiff for $t
         where
-            K: SerdeDiff + Serialize + for<'a> Deserialize<'a> $(+ $extra_traits)*, // + Hash + Eq,
+            K: Serialize + for<'a> Deserialize<'a> $(+ $extra_traits)*, // + Hash + Eq,
             V: SerdeDiff + Serialize + for<'a> Deserialize<'a>,
         {
             fn diff<'a, S: SerializeSeq>(
@@ -162,7 +162,6 @@ macro_rules! map_serde_diff {
 
                 let mut changed = false;
 
-                // TODO: detect renames
                 for (key, self_value) in self.iter() {
                     match other.get(key) {
                         Some(other_value) => {

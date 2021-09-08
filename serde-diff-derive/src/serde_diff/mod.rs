@@ -332,6 +332,9 @@ fn generate(
                 match (self, other) {
                     #(#diff_match_arms)*
                 }
+                if (__changed__) {
+                    ctx.save_exit()?;
+                }
                 Ok(__changed__)
             }
         }

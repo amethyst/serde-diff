@@ -320,6 +320,7 @@ fn generate(
     // Generate the SerdeDiff::diff function for the type
     let diff_fn = if let Some(ref ty) = target_type {
         quote! {
+            #[allow(clippy::float_cmp)]
             fn diff<'a, S: serde_diff::_serde::ser::SerializeSeq>(&self, ctx: &mut serde_diff::DiffContext<'a, S>, other: &Self) -> Result<bool, S::Error> {
                 std::convert::Into::<#ty>::into(std::clone::Clone::clone(self))
                     .diff(ctx, &std::convert::Into::<#ty>::into(std::clone::Clone::clone(other)))
@@ -327,6 +328,7 @@ fn generate(
         }
     } else {
         quote! {
+            #[allow(clippy::float_cmp)]
             fn diff<'a, S: serde_diff::_serde::ser::SerializeSeq>(&self, ctx: &mut serde_diff::DiffContext<'a, S>, other: &Self) -> Result<bool, S::Error> {
                 let mut __changed__ = false;
                 match (self, other) {

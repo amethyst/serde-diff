@@ -27,7 +27,7 @@ pub struct DiffContext<'a, S: SerializeSeq> {
     /// Mode for serializing field paths
     field_path_mode: FieldPathMode,
     /// Set to true if any change is detected
-    has_changes: bool,
+    has_changes: &'a mut bool,
 }
 
 impl<'a, S: SerializeSeq> Drop for DiffContext<'a, S> {
@@ -52,7 +52,7 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
 
     /// True if a change operation has been written
     pub fn has_changes(&self) -> bool {
-        self.has_changes
+        *self.has_changes
     }
 
     /// Called when we visit a field. If the structure is recursive (i.e. struct within struct,
@@ -186,7 +186,7 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
             }
             self.element_stack_start = 0;
         }
-        self.has_changes |= is_change;
+        *self.has_changes |= is_change;
         self.implicit_exit_written = implicit_exit;
         self.serializer.serialize_element(value)
     }
@@ -225,7 +225,7 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
             serializer: &mut *self.serializer,
             implicit_exit_written: self.implicit_exit_written,
             field_path_mode: self.field_path_mode,
-            has_changes: false,
+            has_changes: self.has_changes,
         }
     }
 }
@@ -294,7 +294,7 @@ impl<'a, 'b, T: SerdeDiff> Serialize for Diff<'a, 'b, T> {
                     implicit_exit_written: false,
                     parent_element_stack: None,
                     field_path_mode: self.field_path_mode,
-                    has_changes: false,
+                    has_changes: &mut false,
                 };
                 self.old.diff(&mut ctx, &self.new).unwrap();
             }
@@ -314,13 +314,13 @@ impl<'a, 'b, T: SerdeDiff> Serialize for Diff<'a, 'b, T> {
                 implicit_exit_written: false,
                 parent_element_stack: None,
                 field_path_mode: self.field_path_mode,
-                has_changes: false,
+                has_changes: &mut false,
             };
 
             // Do the actual comparison, writing diff commands (see DiffCommandRef, DiffCommandValue)
             // into the sequence
             self.old.diff(&mut ctx, &self.new)?;
-            self.has_changes.set(ctx.has_changes);
+            self.has_changes.set(*ctx.has_changes);
         }
 
         // End the sequence on the serializer

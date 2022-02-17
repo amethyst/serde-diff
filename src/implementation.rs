@@ -172,9 +172,10 @@ macro_rules! map_serde_diff {
                             if <V as SerdeDiff>::diff(self_value, &mut subctx, other_value)? {
                                 changed = true;
                             }
+                            subctx.pop_path_element()?;
                         },
                         None => {
-                            ctx.save_command(&DiffCommandRef::RemoveKey(key), true, true)?;
+                            ctx.save_command(&DiffCommandRef::RemoveKey(key), false, true)?;
                             changed = true;
                         },
                     }
@@ -182,15 +183,12 @@ macro_rules! map_serde_diff {
 
                 for (key, other_value) in other.iter() {
                     if !self.contains_key(key) {
-                        ctx.save_command(&DiffCommandRef::AddKey(key), true, true)?;
-                        ctx.save_command(&DiffCommandRef::Value(other_value), true, true)?;
+                        ctx.save_command(&DiffCommandRef::AddKey(key), false, true)?;
+                        ctx.save_command(&DiffCommandRef::Value(other_value), false, true)?;
                         changed = true;
                     }
                 }
 
-                if changed {
-                    ctx.save_command::<()>(&DiffCommandRef::Exit, true, false)?;
-                }
                 Ok(changed)
             }
 
@@ -268,9 +266,6 @@ macro_rules! set_serde_diff {
                     }
                 }
 
-                if changed {
-                    ctx.save_command::<()>(&DiffCommandRef::Exit, true, false)?;
-                }
                 Ok(changed)
             }
 

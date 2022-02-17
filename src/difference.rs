@@ -27,7 +27,7 @@ pub struct DiffContext<'a, S: SerializeSeq> {
     /// Mode for serializing field paths
     field_path_mode: FieldPathMode,
     /// Set to true if any change is detected
-    has_changes: bool,
+    has_changes: &'a mut bool,
 }
 
 impl<'a, S: SerializeSeq> Drop for DiffContext<'a, S> {
@@ -52,27 +52,44 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
 
     /// True if a change operation has been written
     pub fn has_changes(&self) -> bool {
-        self.has_changes
+        *self.has_changes
     }
 
     /// Called when we visit a field. If the structure is recursive (i.e. struct within struct,
     /// elements within an array) this may be called more than once before a corresponding pop_path_element
     /// is called. See `pop_path_element`
-    pub fn push_field(&mut self, field_name: &'static str) {
-        self.element_stack
-            .as_mut()
-            .unwrap()
-            .push(ElementStackEntry::PathElement(DiffPathElementValue::Field(
-                Cow::Borrowed(field_name),
-            )));
+    pub fn push_field(&mut self, field_idx: u16, field_name: &'static str) {
+        if matches!(self.field_path_mode, FieldPathMode::Index) {
+            self.push_field_index(field_idx);
+        } else {
+            self.element_stack
+                .as_mut()
+                .unwrap()
+                .push(ElementStackEntry::PathElement(DiffPathElementValue::Field(
+                    Cow::Borrowed(field_name),
+                )));
+        }
     }
 
-    pub fn push_variant(&mut self, variant_name: &'static str) {
+    pub fn push_variant(&mut self, variant_idx: u16, variant_name: &'static str) {
+        if matches!(self.field_path_mode, FieldPathMode::Index) {
+            self.push_variant_index(variant_idx);
+        } else {
+            self.element_stack
+                .as_mut()
+                .unwrap()
+                .push(ElementStackEntry::PathElement(
+                    DiffPathElementValue::EnumVariant(Cow::Borrowed(variant_name)),
+                ));
+        }
+    }
+
+    pub fn push_variant_index(&mut self, variant_idx: u16) {
         self.element_stack
             .as_mut()
             .unwrap()
             .push(ElementStackEntry::PathElement(
-                DiffPathElementValue::EnumVariant(Cow::Borrowed(variant_name)),
+                DiffPathElementValue::EnumVariantIndex(variant_idx),
             ));
     }
 
@@ -169,7 +186,7 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
             }
             self.element_stack_start = 0;
         }
-        self.has_changes |= is_change;
+        *self.has_changes |= is_change;
         self.implicit_exit_written = implicit_exit;
         self.serializer.serialize_element(value)
     }
@@ -208,7 +225,7 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
             serializer: &mut *self.serializer,
             implicit_exit_written: self.implicit_exit_written,
             field_path_mode: self.field_path_mode,
-            has_changes: false,
+            has_changes: self.has_changes,
         }
     }
 }
@@ -277,7 +294,7 @@ impl<'a, 'b, T: SerdeDiff> Serialize for Diff<'a, 'b, T> {
                     implicit_exit_written: false,
                     parent_element_stack: None,
                     field_path_mode: self.field_path_mode,
-                    has_changes: false,
+                    has_changes: &mut false,
                 };
                 self.old.diff(&mut ctx, &self.new).unwrap();
             }
@@ -297,13 +314,13 @@ impl<'a, 'b, T: SerdeDiff> Serialize for Diff<'a, 'b, T> {
                 implicit_exit_written: false,
                 parent_element_stack: None,
                 field_path_mode: self.field_path_mode,
-                has_changes: false,
+                has_changes: &mut false,
             };
 
             // Do the actual comparison, writing diff commands (see DiffCommandRef, DiffCommandValue)
             // into the sequence
             self.old.diff(&mut ctx, &self.new)?;
-            self.has_changes.set(ctx.has_changes);
+            self.has_changes.set(*ctx.has_changes);
         }
 
         // End the sequence on the serializer
@@ -601,6 +618,7 @@ pub enum DiffPathElementValue<'a> {
     Field(Cow<'a, str>),
     FieldIndex(u16),
     EnumVariant(Cow<'a, str>),
+    EnumVariantIndex(u16),
     FullEnumVariant,
     CollectionIndex(usize),
     AddToCollection,

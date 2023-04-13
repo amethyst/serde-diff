@@ -148,6 +148,11 @@ impl<'a, S: SerializeSeq> DiffContext<'a, S> {
         self.save_command(&DiffCommandRef::Value(value), true, true)
     }
 
+    /// Write exit command
+    pub fn save_exit(&mut self) -> Result<(), S::Error> {
+        self.save_command::<()>(&DiffCommandRef::Exit, true, false)
+    }
+
     /// Stores an arbitrary DiffCommand to be handled by the type.
     /// Any custom sequence of DiffCommands must be followed by Exit.
     pub fn save_command<'b, T: Serialize>(

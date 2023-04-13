@@ -1,7 +1,9 @@
 use crate as serde_diff;
 use crate::{Apply, Diff, SerdeDiff};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt::Debug;
+use std::iter::FromIterator;
 
 #[derive(SerdeDiff, Serialize, Deserialize, PartialEq, Debug, Copy, Clone)]
 struct TestStruct {
@@ -58,6 +60,18 @@ fn test_option() {
     roundtrip(
         Some(TestStruct { a: 52, b: 32. }),
         Some(TestStruct { a: 42, b: 12. }),
+    );
+    roundtrip(
+        HashMap::from_iter([
+            (1, TestStruct { a: 1, b: 1. }),
+            (2, TestStruct { a: 2, b: 2. }),
+            (3, TestStruct { a: 3, b: 3. }),
+        ]),
+        HashMap::from_iter([
+            (1, TestStruct { a: 1, b: 1. }),
+            (3, TestStruct { a: 4, b: 4. }),
+            (4, TestStruct { a: 1, b: 1. }),
+        ]),
     );
 
     partial(

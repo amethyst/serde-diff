@@ -290,7 +290,7 @@ opaque_serde_diff!(f64);
 opaque_serde_diff!(char);
 opaque_serde_diff!(String);
 opaque_serde_diff!(std::ffi::CString);
-#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+#[cfg(not(all(target_arch = "wasm32")))]
 opaque_serde_diff!(std::ffi::OsString);
 opaque_serde_diff!(std::num::NonZeroU8);
 opaque_serde_diff!(std::num::NonZeroU16);
